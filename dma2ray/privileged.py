@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Small privileged helper for mihomo TUN mode.
+"""Small privileged helper for Xray TUN mode.
 
-Started through pkexec. It owns the root mihomo process, writes its log and
-reverts routes by stopping mihomo gracefully. It only accepts commands from
-the user who started it and only uses paths fixed at startup.
+Started through pkexec. It owns the root Xray process, writes its log and
+reverts routes by stopping Xray gracefully. It only accepts commands from the
+user who started it and only uses paths fixed at startup.
 """
 
 from __future__ import annotations
@@ -51,11 +51,8 @@ def _under(path: Path, root: Path) -> bool:
 
 
 class Runner:
-    def __init__(
-        self, core: Path, workdir: Path, config: Path, log_path: Path, uid: int, gid: int
-    ) -> None:
-        self.core = core
-        self.workdir = workdir
+    def __init__(self, xray: Path, config: Path, log_path: Path, uid: int, gid: int) -> None:
+        self.xray = xray
         self.config = config
         self.log_path = log_path
         self.uid = uid
@@ -96,7 +93,7 @@ class Runner:
 
             try:
                 self.proc = subprocess.Popen(
-                    [str(self.core), "-d", str(self.workdir), "-f", str(self.config)],
+                    [str(self.xray), "run", "-c", str(self.config)],
                     stdin=subprocess.DEVNULL,
                     stdout=log_handle,
                     stderr=subprocess.STDOUT,
@@ -110,14 +107,14 @@ class Runner:
                 )
             except OSError as exc:
                 log_handle.close()
-                return {"ok": False, "error": f"Не удалось запустить mihomo: {exc}"}
+                return {"ok": False, "error": f"Не удалось запустить Xray: {exc}"}
             finally:
                 try:
                     log_handle.close()
                 except Exception:
                     pass
 
-            # Give mihomo a moment to create the TUN device and install routes.
+            # Give Xray a moment to create the TUN device and install routes.
             time.sleep(1.0)
             code = self.proc.poll()
             if code is not None:
@@ -125,7 +122,7 @@ class Runner:
                 self.proc = None
                 return {
                     "ok": False,
-                    "error": f"mihomo завершился с кодом {code}",
+                    "error": f"Xray завершился с кодом {code}",
                     "log": tail,
                 }
             return {
@@ -175,10 +172,7 @@ class Helper:
         self.socket_path = Path(args.socket)
         self.uid = int(args.uid)
         self.gid = int(args.gid)
-        self.runner = Runner(
-            Path(args.core), Path(args.dir), Path(args.config), Path(args.log),
-            self.uid, self.gid,
-        )
+        self.runner = Runner(Path(args.xray), Path(args.config), Path(args.log), self.uid, self.gid)
         self.server: socket.socket | None = None
         self.stop_event = threading.Event()
         self._validate_paths()
@@ -188,14 +182,12 @@ class Helper:
             home = Path(pwd.getpwuid(self.uid).pw_dir)
         except KeyError:
             home = Path("/root")
-        core = self.runner.core
-        if not core.is_file() or not os.access(core, os.X_OK):
-            raise SystemExit(f"mihomo не найден или не исполняемый: {core}")
+        xray = self.runner.xray
+        if not xray.is_file() or not os.access(xray, os.X_OK):
+            raise SystemExit(f"Xray не найден или не исполняемый: {xray}")
         allowed_roots = [home, Path("/usr"), Path("/usr/local"), Path("/opt"), Path("/app")]
-        if not any(_under(core, root) for root in allowed_roots):
-            raise SystemExit(f"mihomo вне разрешённых каталогов: {core}")
-        if not any(_under(self.runner.workdir, root) for root in allowed_roots):
-            raise SystemExit(f"Рабочий каталог mihomo вне разрешённых каталогов: {self.runner.workdir}")
+        if not any(_under(xray, root) for root in allowed_roots):
+            raise SystemExit(f"Xray вне разрешённых каталогов: {xray}")
         if not _under(self.runner.config, home):
             raise SystemExit("Конфиг должен находиться в домашнем каталоге пользователя")
         if not _under(self.runner.log_path, home):
@@ -301,10 +293,9 @@ class Helper:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Privileged mihomo helper for dma2ray")
+    parser = argparse.ArgumentParser(description="Privileged Xray helper for dma2ray")
     parser.add_argument("--socket", required=True)
-    parser.add_argument("--core", required=True)
-    parser.add_argument("--dir", required=True)
+    parser.add_argument("--xray", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--log", required=True)
     parser.add_argument("--uid", required=True)
