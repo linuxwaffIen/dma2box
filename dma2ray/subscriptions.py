@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import urllib.request
 import urllib.error
+import io
 from .state import Profile
 import base64
 import gzip
@@ -146,9 +147,12 @@ def fetch_subscription(url: str, timeout: float = 25.0) -> str:
 
     if encoding == "gzip":
         try:
-            data = gzip.decompress(data)
-        except OSError as exc:
+            with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+                data = stream.read(MAX_SUBSCRIPTION_BYTES + 1)
+        except (OSError, EOFError) as exc:
             raise ValueError("Не удалось распаковать gzip-ответ") from exc
+        if len(data) > MAX_SUBSCRIPTION_BYTES:
+            raise ValueError("Подписка больше 5 МБ")
     try:
         return data.decode(charset, errors="replace")
     except LookupError:

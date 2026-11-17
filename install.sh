@@ -179,7 +179,8 @@ install_system_helper() {
     # Требует root; вызывается только при установке (не при удалении).
     if [[ $EUID -ne 0 ]]; then
         echo "Для установки system-хелпера нужен root: sudo ./install.sh --system" >&2
-        return 1
+        echo "Продолжаю без system-хелпера (TUN-режим потребует ручной настройки polkit)."
+        return 0
     fi
 
     local bin_src="$ROOT/dist/dma2ray.dist/dma2ray"
@@ -191,9 +192,32 @@ install_system_helper() {
     local PY
     PY=$(command -v python3)
 
+    # TUN is a root process, so it must never execute the copy of Xray that
+    # the desktop user can replace. Pin the downloaded core in the root-owned
+    # helper directory during system installation.
+    local install_home="$HOME"
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        install_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    fi
+    local data_home="${XDG_DATA_HOME:-$install_home/.local/share}"
+    local xray_src="${DMA2RAY_XRAY_BIN:-$data_home/dma2ray/bin/$(uname -m)/xray/xray}"
+    local amnezia_src="${DMA2RAY_AMNEZIA_XRAY_BIN:-$data_home/dma2ray/bin/$(uname -m)/amnezia/xray}"
+
     install -d -m 755 "$DIR"
     install -m 755 "$bin_src" "$DIR/dma2ray"
     install -m 755 "$priv_src" "$DIR/priv.py"
+    if [[ -n "$xray_src" && -x "$xray_src" ]]; then
+        install -o root -g root -m 755 "$xray_src" "$DIR/xray"
+        echo "Root-owned Xray installed: $DIR/xray"
+    else
+        echo "Xray не найден для root-owned установки. TUN пока отключён."
+        echo "Скачайте Xray в приложении и повторите: sudo DMA2RAY_XRAY_BIN=/path/to/xray ./install.sh --system"
+    fi
+    if [[ -n "$amnezia_src" && -x "$amnezia_src" ]]; then
+        install -d -o root -g root -m 755 "$DIR/amnezia"
+        install -o root -g root -m 755 "$amnezia_src" "$DIR/amnezia/xray"
+        echo "Root-owned Amnezia Xray installed: $DIR/amnezia/xray"
+    fi
 
     cat > "$DIR/dma2ray-helper" <<EOF
 #!/bin/sh

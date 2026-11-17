@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, unquote, urlsplit
 
@@ -118,44 +119,49 @@ def build_hysteria_config(
 
 def format_hysteria_config(cfg: dict) -> str:
     """Сериализация конфига Hysteria в YAML-текст (без внешних зависимостей)."""
+    def scalar(value: object) -> str:
+        # JSON strings are valid YAML double-quoted scalars. Always quote values
+        # so credentials containing ':', '#', quotes, or newlines stay data.
+        return json.dumps(str(value), ensure_ascii=False)
+
     lines: list[str] = []
-    lines.append(f"server: {cfg['server']}")
-    lines.append(f"auth: {cfg['auth']}")
+    lines.append(f"server: {scalar(cfg['server'])}")
+    lines.append(f"auth: {scalar(cfg['auth'])}")
 
     tls = cfg.get("tls", {})
     if tls:
         lines.append("tls:")
-        lines.append(f"  sni: {tls.get('sni', '')}")
+        lines.append(f"  sni: {scalar(tls.get('sni', ''))}")
         if tls.get("insecure"):
             lines.append("  insecure: true")
         if tls.get("pinSHA256"):
-            lines.append(f"  pinSHA256: {tls['pinSHA256']}")
+            lines.append(f"  pinSHA256: {scalar(tls['pinSHA256'])}")
 
     socks = cfg.get("socks5", {})
     if socks:
         lines.append("socks5:")
-        lines.append(f"  listen: {socks['listen']}")
+        lines.append(f"  listen: {scalar(socks['listen'])}")
 
     http = cfg.get("http", {})
     if http:
         lines.append("http:")
-        lines.append(f"  listen: {http['listen']}")
+        lines.append(f"  listen: {scalar(http['listen'])}")
 
     obfs = cfg.get("obfs")
     if obfs:
         lines.append("obfs:")
-        lines.append(f"  type: {obfs.get('type')}")
+        lines.append(f"  type: {scalar(obfs.get('type'))}")
         sal = obfs.get("salamander", {})
         if sal.get("password"):
             lines.append("  salamander:")
-            lines.append(f"    password: {sal['password']}")
+            lines.append(f"    password: {scalar(sal['password'])}")
 
     tun = cfg.get("tun")
     if tun:
         lines.append("tun:")
-        lines.append(f"  name: {tun.get('name')}")
+        lines.append(f"  name: {scalar(tun.get('name'))}")
         lines.append(f"  mtu: {tun.get('mtu')}")
-        lines.append(f"  timeout: {tun.get('timeout')}")
+        lines.append(f"  timeout: {scalar(tun.get('timeout'))}")
         addr = tun.get("address", {})
         lines.append("  address:")
         lines.append(f"    ipv4: {addr.get('ipv4', '')}")

@@ -51,6 +51,9 @@ class BuildConfigTests(unittest.TestCase):
             tun["settings"]["autoSystemRoutingTable"], ["0.0.0.0/0", "::/0"]
         )
         self.assertEqual(tun["settings"]["autoOutboundsInterface"], "auto")
+        self.assertEqual(
+            config["outbounds"][0]["streamSettings"]["sockopt"]["mark"], 0xD2A2
+        )
         self.assertNotIn("autoSystemDnsToGateway", tun["settings"])
 
         self.assertIn("dns", config)
@@ -76,6 +79,13 @@ class BuildConfigTests(unittest.TestCase):
         self.assertEqual(len(private_rules), 1)
         self.assertEqual(private_rules[0]["outboundTag"], "direct")
         self.assertNotIn("::/0", tun["settings"]["autoSystemRoutingTable"])
+        self.assertEqual(
+            config["outbounds"][0]["streamSettings"]["sockopt"]["mark"], 0xD2A2
+        )
+        self.assertEqual(config["routing"]["domainStrategy"], "IPIfNonMatch")
+        self.assertEqual(rules[-1], {"type": "field", "network": "tcp,udp", "outboundTag": "proxy"})
+        dns_rule = next(rule for rule in rules if rule.get("outboundTag") == "dns-out")
+        self.assertEqual(dns_rule["network"], "tcp,udp")
 
     def test_ports_must_differ(self) -> None:
         with self.assertRaises(ValueError):

@@ -12,6 +12,9 @@ TUN_GATEWAY = "172.19.0.1/30"
 TUN_GATEWAY_V6 = "fdfe:dcba:9876::1/126"
 TUN_MTU = 1500
 DNS_TAG = "dns-in"
+# Reserved for Xray's own transport sockets. The privileged helper installs an
+# fwmark rule that sends these sockets through the ordinary physical routes.
+TUN_XRAY_MARK = 0xD2A2
 
 
 def is_ipv6_supported() -> bool:
@@ -126,6 +129,9 @@ def build_config(
         },
     ]
     if tun:
+        proxy = outbounds[0]
+        stream_settings = proxy.setdefault("streamSettings", {})
+        stream_settings.setdefault("sockopt", {})["mark"] = TUN_XRAY_MARK
         outbounds.append({"tag": "dns-out", "protocol": "dns"})
 
     config: dict[str, Any] = {
@@ -143,7 +149,7 @@ def build_config(
             "serveStale": True,
         }
         config["routing"] = {
-            "domainStrategy": "AsIs",
+            "domainStrategy": "IPIfNonMatch",
             "rules": [
                 # DNS requests made by Xray itself (DoH) go through the tunnel.
                 {"type": "field", "inboundTag": [DNS_TAG], "outboundTag": "proxy"},
@@ -152,10 +158,13 @@ def build_config(
                     "type": "field",
                     "inboundTag": ["tun-in"],
                     "port": "53",
+                    "network": "tcp,udp",
                     "outboundTag": "dns-out",
                 },
                 # Keep LAN/private destinations local.
                 _private_rule(),
+                # Never depend on outbound ordering to provide the TUN default.
+                {"type": "field", "network": "tcp,udp", "outboundTag": "proxy"},
             ],
         }
     else:

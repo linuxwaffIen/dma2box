@@ -30,6 +30,13 @@ from .hysteria import (
 SYSTEM_DIR = Path("/usr/libexec/dma2ray")
 SYSTEM_HELPER = SYSTEM_DIR / "dma2ray-helper"
 SYSTEM_XRAY = SYSTEM_DIR / "xray"
+SYSTEM_AMNEZIA_XRAY = SYSTEM_DIR / "amnezia" / "xray"
+
+
+def _system_xray_for(binary: Path) -> Path:
+    if binary.parent.name.lower().startswith("amnezia"):
+        return SYSTEM_AMNEZIA_XRAY
+    return SYSTEM_XRAY
 
 class CoreError(RuntimeError):
     pass
@@ -54,6 +61,13 @@ def _tail(path: Path, limit: int = 16000) -> str:
             return handle.read().decode("utf-8", errors="replace").strip()
     except OSError:
         return ""
+
+
+def _log_session(engine: str) -> None:
+    paths.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    with paths.LOG_FILE.open("ab") as handle:
+        handle.write(f"\n\n===== {stamp} · {engine} =====\n".encode("utf-8"))
 
 
 def _read_since(path: Path, offset: int, limit: int = 8000) -> str:
@@ -306,6 +320,45 @@ class CoreManager:
         )
         thread.start()
 
+    def inspect_network(self) -> dict:
+        """Ask the privileged helper for a read-only routing/firewall snapshot."""
+        with self._lock:
+            if self._status.tun and self._helper is not None:
+                return self._helper.request({"cmd": "inspect-network"}, timeout=20)
+        helper = SYSTEM_HELPER
+        try:
+            info = helper.stat()
+        except OSError as exc:
+            raise CoreError("Для root-диагностики сначала установите системный helper") from exc
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise CoreError("Системный helper должен принадлежать root и быть недоступен для записи группе/остальным")
+        command = [str(helper), "--inspect-network"]
+        if os.geteuid() != 0:
+            pkexec = shutil.which("pkexec")
+            if not pkexec:
+                raise CoreError("Для чтения nftables нужен pkexec (polkit)")
+            command.insert(0, pkexec)
+        try:
+            proc = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise CoreError(f"Не удалось запустить root-диагностику: {exc}") from exc
+        if proc.returncode:
+            detail = proc.stderr.strip() or proc.stdout.strip()
+            raise CoreError(detail or f"Диагностика завершилась с кодом {proc.returncode}")
+        try:
+            response = json.loads(proc.stdout)
+        except ValueError as exc:
+            raise CoreError("Helper вернул некорректный отчёт диагностики") from exc
+        if not isinstance(response, dict) or not response.get("ok"):
+            raise CoreError("Helper не смог собрать диагностику сети")
+        return response
+
     def stop(self) -> None:
         # Cancel a pending pkexec prompt or config check as soon as possible.
         self._cancel.set()
@@ -339,7 +392,10 @@ class CoreManager:
                 if self._cancel.is_set() or self._intentional:
                     self._emit(CoreStatus("stopped"))
                     return
-                self._stop_internal(shutdown_helper=True, notify=False)
+                # Keep the authenticated root helper alive between reconnects;
+                # it only stops the current core and can start it again without
+                # launching pkexec and requesting the password a second time.
+                self._stop_internal(shutdown_helper=False, notify=False)
                 self._emit(
                     CoreStatus("starting", profile.id, tun, "Проверка Xray-core…")
                 )
@@ -349,7 +405,7 @@ class CoreManager:
                     if isinstance(parsed, HysteriaProfile):
                         binary = find_hysteria()
                         if binary is None:
-                            raise CoreError("Hysteria не найдена. Скачайте её в меню «Ядра».")
+                            raise CoreError("Hysteria не найдена. Скачайте её через меню «Ядра».")
                         address = self._resolve(parsed.address, parsed.port)
                         settings = dict(self.store.settings)
                         cfg = build_hysteria_config(
@@ -363,7 +419,8 @@ class CoreManager:
                             format_hysteria_config(cfg), encoding="utf-8"
                         )
                         paths.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-                        log_handle = paths.LOG_FILE.open("wb", buffering=0)
+                        _log_session("Hysteria 2")
+                        log_handle = paths.LOG_FILE.open("ab", buffering=0)
                         try:
                             proc = subprocess.Popen(
                                 [str(binary), "client", "-c", str(paths.HY_CONFIG_FILE)],
@@ -417,13 +474,19 @@ class CoreManager:
                         self._validate(xray)
                         self._raise_if_cancelled()
                         paths.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+                        if tun and paths.CONFIG_FILE.is_file():
+                            backup = paths.CONFIG_FILE.with_name(
+                                f"{paths.CONFIG_FILE.name}.bak-{int(time.time())}"
+                            )
+                            shutil.copy2(paths.CONFIG_FILE, backup)
+                            backup.chmod(0o600)
                         if tun:
                             self._start_tun(xray)
                         else:
                             self._start_direct(xray)
                         self._emit(CoreStatus("running", profile.id, tun, "Подключено"))
                 except Exception as exc:
-                        self._stop_internal(shutdown_helper=True, notify=False)
+                        self._stop_internal(shutdown_helper=False, notify=False)
                         if self._cancel.is_set() or self._intentional:
                             self._emit(CoreStatus("stopped"))
                             return
@@ -454,7 +517,9 @@ class CoreManager:
 
     # --------------------------------------------------------------- direct
     def _start_direct(self, xray: Path) -> None:
-        log_handle = paths.LOG_FILE.open("wb", buffering=0)
+        engine = "Amnezia Xray" if xray.parent.name.lower().startswith("amnezia") else "Xray"
+        _log_session(engine)
+        log_handle = paths.LOG_FILE.open("ab", buffering=0)
         try:
             proc = subprocess.Popen(
                 [str(xray), "run", "-c", str(paths.CONFIG_FILE)],
@@ -510,6 +575,8 @@ class CoreManager:
                 "Запуск TUN (может потребоваться пароль)…",
             )
         )
+        engine = "Amnezia Xray" if xray.parent.name.lower().startswith("amnezia") else "Xray"
+        _log_session(engine)
         self._ensure_helper(xray)
         assert self._helper is not None
         response = self._helper.request({"cmd": "start"}, timeout=45)
@@ -523,49 +590,45 @@ class CoreManager:
         thread.start()
 
     def _helper_command(self, xray: Path) -> tuple[list[str], bool]:
-        getuid = getattr(os, "getuid", lambda: 0)
-        getgid = getattr(os, "getgid", lambda: 0)
         geteuid = getattr(os, "geteuid", lambda: 0)
         run_as_root = geteuid() == 0
-        use_system = (
-            not run_as_root and SYSTEM_HELPER.is_file() and SYSTEM_XRAY.is_file()
-        )
-        target_xray = SYSTEM_XRAY if use_system else xray
+        system_xray = _system_xray_for(xray)
+        if not SYSTEM_HELPER.is_file() or not system_xray.is_file():
+            raise CoreError(
+                f"TUN требует root-owned helper и ядро {system_xray}. "
+                "Скачайте ядро и переустановите системный пакет с sudo ./install.sh --system."
+            )
         args = [
             "--socket",
             str(paths.PRIV_SOCKET),
             "--xray",
-            str(target_xray),
+            str(system_xray),
             "--config",
             str(paths.CONFIG_FILE),
             "--log",
             str(paths.LOG_FILE),
             "--uid",
-            str(getuid()),
+            str(os.getuid()),
             "--gid",
-            str(getgid()),
+            str(os.getgid()),
         ]
         if run_as_root:
-            command = [paths.python_bin(), str(paths.PRIV_SCRIPT), *args]
+            command = [str(SYSTEM_HELPER), *args]
         else:
             pkexec = shutil.which("pkexec")
             if not pkexec:
-                raise CoreError(
-                    "Для TUN нужен pkexec (polkit). Установите polkit "
-                    "или запустите приложение от root."
-                )
-            if use_system:
-                command = [pkexec, str(SYSTEM_HELPER), *args]
-            else:
-                command = [pkexec, paths.python_bin(), str(paths.PRIV_SCRIPT), *args]
+                raise CoreError("Для TUN нужен pkexec (polkit). Установите polkit.")
+            command = [pkexec, str(SYSTEM_HELPER), *args]
         return command, run_as_root
 
     def _ensure_helper(self, xray: Path) -> None:
-        use_system = (
-            os.geteuid() != 0 and SYSTEM_HELPER.is_file() and SYSTEM_XRAY.is_file()
-        )
-        if use_system:
-            xray = SYSTEM_XRAY  # root запускает только свою копию ядра
+        system_xray = _system_xray_for(xray)
+        if not SYSTEM_HELPER.is_file() or not system_xray.is_file():
+            raise CoreError(
+                f"TUN требует установленный системный helper и root-owned ядро: {system_xray}. "
+                "Установите ядро и повторите sudo ./install.sh --system."
+            )
+        xray = system_xray
 
         key = (str(xray), str(paths.CONFIG_FILE), str(paths.LOG_FILE))
         if self._helper is not None and self._helper_key == key:
@@ -577,11 +640,6 @@ class CoreManager:
                 self._close_helper(shutdown=True)
 
         self._close_helper(shutdown=True)
-        try:
-            paths.PRIV_SOCKET.unlink()
-        except FileNotFoundError:
-            pass
-
         command, run_as_root = self._helper_command(xray)
         helper_log = paths.CACHE_DIR / "helper.log"
         helper_log.parent.mkdir(parents=True, exist_ok=True)
@@ -845,7 +903,7 @@ class CoreManager:
         if found is not None:
             return found
         raise CoreError(
-            "Xray-core не найден. Скачайте его в «Настройки → Ядро → Скачать» "
+            "Xray-core не найден. Скачайте его через меню «Ядра» "
             "или укажите путь к существующему бинарнику xray."
         )
 

@@ -114,6 +114,38 @@ WIRED_ICON_SVG = """<?xml version="1.0" encoding="UTF-8"?>
 </svg>
 """
 
+# Small, filled symbolic glyphs designed as one family. `currentColor` lets
+# GTK recolor them from the active light/dark palette without raster assets.
+_SYMBOLIC_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <path fill="currentColor" d="{path}"/>
+</svg>
+'''
+
+SYMBOLIC_ICONS: dict[str, str] = {
+    "dma2ray-server-symbolic": "M4 3h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 10h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2Zm2-7a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm0 10a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm11-10a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm0 10a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z",
+    "dma2ray-subscription-symbolic": "M6 2h8l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 2v4h4M8 12h8v2H8zm0 4h8v2H8z",
+    "dma2ray-route-symbolic": "M5 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm14 12a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM8 5h6a4 4 0 0 1 4 4v3h-2V9a2 2 0 0 0-2-2H8V5Zm8 5 3 3 3-3h-6ZM5 10h2v5a2 2 0 0 0 2 2h5v2H9a4 4 0 0 1-4-4v-5Z",
+    "dma2ray-speed-symbolic": "M12 3a9 9 0 1 0 8.5 12h-3.2a6 6 0 1 1 0-6H21A9 9 0 0 0 12 3Zm5.2 5.2-4.1 4.1a2 2 0 1 1-1.4-1.4l4.1-4.1 1.4 1.4Z",
+    "dma2ray-shield-symbolic": "M12 2 3.5 5v6.1c0 5.1 3.5 9.1 8.5 10.9 5-1.8 8.5-5.8 8.5-10.9V5L12 2Zm-1.2 13.8-3.4-3.4 1.7-1.7 1.7 1.7 4.1-4.1 1.7 1.7-5.8 5.8Z",
+    "dma2ray-globe-symbolic": "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm6.9 9h-3a15 15 0 0 0-1.4-5.1 8 8 0 0 1 4.4 5.1ZM12 4c1.1 1.5 1.8 4 2 7h-4c.2-3 1-5.5 2-7ZM4.1 13h3a15 15 0 0 0 1.4 5.1A8 8 0 0 1 4.1 13Zm3-2h-3a8 8 0 0 1 4.4-5.1A15 15 0 0 0 7.1 11Zm4.9 9c-1.1-1.5-1.8-4-2-7h4c-.2 3-1 5.5-2 7Zm2.5-1.9a15 15 0 0 0 1.4-5.1h3a8 8 0 0 1-4.4 5.1Z",
+    "dma2ray-qr-symbolic": "M3 3h8v8H3V3Zm2 2v4h4V5H5Zm8-2h8v8h-8V3Zm2 2v4h4V5h-4ZM3 13h8v8H3v-8Zm2 2v4h4v-4H5Zm8-2h3v3h-3v-3Zm5 0h3v5h-3v-2h-2v-3h2Zm-5 5h3v3h-3v-3Zm5 2h3v1h-3v-1Z",
+    "dma2ray-import-symbolic": "M11 2h2v10l3.5-3.5 1.4 1.4-5.9 5.9-5.9-5.9 1.4-1.4L11 12V2ZM4 16h2v3h12v-3h2v5H4v-5Z",
+    "dma2ray-add-symbolic": "M11 3h2v8h8v2h-8v8h-2v-8H3v-2h8V3Z",
+    "dma2ray-refresh-symbolic": "M12 4a8 8 0 0 1 7.5 5H22l-4 4-4-4h2.3A5.5 5.5 0 0 0 6 8l-2-1.1A8 8 0 0 1 12 4Zm-8 7 4 4h-2.3A5.5 5.5 0 0 0 18 16l2 1.1A8 8 0 0 1 4.5 15H2l2-4Z",
+    "dma2ray-settings-symbolic": "M19.4 13a7.7 7.7 0 0 0 0-2l2-1.5-2-3.5-2.4 1a8 8 0 0 0-1.7-1L15 3h-6l-.4 3a8 8 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7.7 7.7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a8 8 0 0 0 1.7 1L9 22h6l.4-3a8 8 0 0 0 1.7-1l2.4 1 2-3.5-2.1-1.5ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z",
+    "dma2ray-copy-symbolic": "M8 3h11a2 2 0 0 1 2 2v12h-2V5H8V3ZM5 7h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Zm0 2v10h10V9H5Z",
+    "dma2ray-check-symbolic": "m9.2 17.2-5-5 1.8-1.8 3.2 3.2 8.8-8.8 1.8 1.8-10.6 10.6Z",
+    "dma2ray-trash-symbolic": "M8 3h8l1 2h4v2H3V5h4l1-2Zm-3 6h14l-1 12H6L5 9Zm4 2v8h2v-8H9Zm4 0v8h2v-8h-2Z",
+    "dma2ray-sort-symbolic": "M4 5h16v2H4V5Zm0 6h11v2H4v-2Zm0 6h6v2H4v-2Z",
+    "dma2ray-stop-symbolic": "M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
+}
+
+SYMBOLIC_ICONS = {
+    name: _SYMBOLIC_TEMPLATE.format(path=path)
+    for name, path in SYMBOLIC_ICONS.items()
+}
+
 ICONS: dict[str, str] = {
     "io.github.dma2ray.Dma2ray": APP_ICON_SVG,
     "dma2ray-tray-stopped": TRAY_ICONS["stopped"],
@@ -130,4 +162,5 @@ ICONS: dict[str, str] = {
     "security-high-symbolic": SECURITY_ICON_SVG,
     "document-edit-symbolic": EDIT_ICON_SVG,
     "adw-entry-apply-symbolic": APPLY_ICON_SVG,
+    **SYMBOLIC_ICONS,
 }

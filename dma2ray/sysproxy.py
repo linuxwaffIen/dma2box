@@ -182,7 +182,7 @@ def _apply_kde(host: str, http_port: int, socks_port: int) -> dict:
                         "--file",
                         "kioslaverc",
                         "--group",
-                        "ProxySettings",
+                        "Proxy Settings",
                         "--key",
                         key,
                         value,

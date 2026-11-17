@@ -149,18 +149,29 @@ def _named_colors(p: dict[str, str]) -> dict[str, str]:
 STRUCTURAL_CSS = """
 .main-headerbar { padding: 4px 6px; }
 
-.main-switcherbar { padding: 8px 10px 10px 10px; }
-.main-switcherbar button {
-    min-width: 88px;
-    min-height: 36px;
-    padding: 6px 14px;
-    border-radius: 18px;
-    font-size: 0.95em;
-    font-weight: 600;
-    transition: background-color 180ms cubic-bezier(0.2, 0, 0, 1),
-                color 180ms cubic-bezier(0.2, 0, 0, 1);
+.main-switcherbar {
+    padding: 4px 8px;
+    border-radius: 999px;
 }
-
+.nav-buttons button {
+    min-width: 72px;
+    min-height: 44px;
+    padding: 6px 8px;
+    margin: 8px 4px;
+    border-radius: 999px;
+    background: transparent;
+    box-shadow: none;
+    font-size: 0.92em;
+    font-weight: 600;
+    transition: color 220ms cubic-bezier(0.2, 0, 0, 1),
+                background-color 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+.nav-indicator {
+    border-radius: 999px;
+    background-color: transparent;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.34),
+                0 1px 3px rgba(0, 0, 0, 0.24);
+}
 .connect-big {
     min-width: 130px;
     min-height: 130px;
@@ -207,6 +218,11 @@ button.kernel-btn {
     min-height: 36px;
     padding: 4px 16px;
     border-radius: 18px;
+}
+.settings-page button {
+    min-height: 42px;
+    padding: 6px 18px;
+    border-radius: 999px;
 }
 .kernel-icon { padding: 10px; border-radius: 12px; }
 
@@ -255,6 +271,10 @@ scrollbar > range > trough > slider {
 scrollbar > range > trough > slider:hover { background-color: alpha(currentColor, 0.44); }
 scrollbar > range > trough > slider:active { background-color: alpha(currentColor, 0.62); }
 
+image.dma2ray-symbolic {
+    transition: color 260ms cubic-bezier(0.2, 0, 0, 1);
+}
+
 .accent-swatch {
     min-width: 34px;
     min-height: 34px;
@@ -292,19 +312,17 @@ COLOR_CSS = """
     background-color: @md_surface_container;
     box-shadow: inset 0 1px alpha(@md_on_surface, 0.08);
 }
-.main-switcherbar button {
+.nav-buttons button {
     background-color: transparent;
     color: @md_on_surface_variant;
     box-shadow: none;
 }
-.main-switcherbar button:hover { background-color: alpha(@md_on_surface, 0.08); }
-.main-switcherbar button:active { background-color: alpha(@md_on_surface, 0.12); }
-.main-switcherbar button:checked {
-    background-color: @md_secondary_container;
-    color: @md_on_secondary_container;
-}
-.main-switcherbar button:checked:hover {
-    background-color: mix(@md_secondary_container, @md_on_secondary_container, 0.08);
+.nav-buttons button:hover,
+.nav-buttons button:active { background-color: transparent; }
+.nav-buttons button.nav-tab-selected {
+    color: @md_on_surface;
+    font-weight: 700;
+    background-color: transparent;
 }
 
 .connect-idle {
@@ -483,6 +501,11 @@ toast label, toast button { color: @md_inverse_on_surface; }
     background-color: @md_surface_container_highest;
     color: @md_on_surface_variant;
 }
+image.dma2ray-accent-icon,
+button.dma2ray-accent-icon {
+    color: @accent_color;
+    transition: color 260ms cubic-bezier(0.2, 0, 0, 1);
+}
 """
 
 
@@ -540,6 +563,10 @@ class ThemeManager:
             Gtk.StyleContext.remove_provider_for_display(self._display, self._active)
         self._load_seed(seed)
         self._active = None
+        self._sync()
+
+    def refresh(self) -> None:
+        """Reapply the palette after the application color scheme changes."""
         self._sync()
 
     def _sync(self, *_args) -> None:

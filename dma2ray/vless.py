@@ -352,8 +352,9 @@ def parse_vmess(uri: str) -> VlessProfile:
 
 
 def parse_hysteria2(uri: str) -> VlessProfile:
-    uri = uri.strip().lower()
-    if not (uri.startswith("hysteria2://") or uri.startswith("hy2://")):
+    uri = uri.strip()
+    lowered = uri.lower()
+    if not (lowered.startswith("hysteria2://") or lowered.startswith("hy2://")):
         raise VlessError("Ссылка должна начинаться с hysteria2:// или hy2://")
     rest = uri.split("://", 1)[1]
     authority, _, query = rest.partition("?")

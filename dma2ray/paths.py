@@ -73,7 +73,10 @@ LOG_FILE = CACHE_DIR / "xray.log"
 CONFIG_FILE = CACHE_DIR / "config.json"
 HY_PATH = CORE_BIN_DIR / "hysteria"
 HY_CONFIG_FILE = CACHE_DIR / "config-hy.yaml"
-PRIV_SOCKET = RUNTIME_DIR / "privileged.sock"
+# The privileged helper owns this root-managed socket directory. Keeping the
+# socket out of the user's writable XDG runtime tree prevents path replacement
+# races against a process running as root.
+PRIV_SOCKET = Path("/run/dma2ray") / f"privileged-{os.getuid()}.sock"
 TRAY_SOCKET = RUNTIME_DIR / "tray.sock"
 ICON_NAME = "io.github.dma2ray.Dma2ray"
 

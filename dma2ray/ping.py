@@ -17,18 +17,22 @@ PING_TYPE_LABELS = {
 
 def tcp_ping(host: str, port: int, timeout: float = 4.0) -> int | None:
     """Measure a TCP handshake to the endpoint. Returns milliseconds or None."""
-    deadline = time.monotonic() + max(0.5, timeout)
+    timeout = max(0.2, float(timeout))
+    deadline = time.monotonic() + timeout
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError:
         return None
-    for family, sock_type, proto, _canon, sockaddr in infos[:4]:
+    addresses = infos[:4]
+    for index, (family, sock_type, proto, _canon, sockaddr) in enumerate(addresses):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        sock = socket.socket(family, sock_type, proto)
+        address_timeout = min(remaining, max(0.25, remaining / (len(addresses) - index)))
+        sock = None
         try:
-            sock.settimeout(remaining)
+            sock = socket.socket(family, sock_type, proto)
+            sock.settimeout(address_timeout)
             started = time.perf_counter()
             sock.connect(sockaddr)
             elapsed = (time.perf_counter() - started) * 1000
@@ -36,7 +40,8 @@ def tcp_ping(host: str, port: int, timeout: float = 4.0) -> int | None:
         except OSError:
             continue
         finally:
-            sock.close()
+            if sock is not None:
+                sock.close()
     return None
 
 
@@ -72,6 +77,7 @@ def icmp_ping(host: str, timeout: float = 4.0) -> int | None:
 
 def http_ping(host: str, port: int, use_tls: bool = False, timeout: float = 4.0) -> int | None:
     """Measure HTTP/HTTPS response latency to endpoint. Returns milliseconds or None."""
+    sock: socket.socket | None = None
     try:
         started = time.perf_counter()
         sock = socket.create_connection((host, port), timeout=timeout)
@@ -81,15 +87,23 @@ def http_ping(host: str, port: int, use_tls: bool = False, timeout: float = 4.0)
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             sock = ctx.wrap_socket(sock, server_hostname=host)
-        sock.sendall(f"HEAD / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: dma2ray\r\nConnection: close\r\n\r\n".encode())
+        host_header = f"[{host}]" if ":" in host else host.encode("idna").decode("ascii")
+        sock.sendall(
+            f"HEAD / HTTP/1.1\r\nHost: {host_header}\r\n"
+            "User-Agent: dma2ray\r\nConnection: close\r\n\r\n".encode("ascii")
+        )
         if not sock.recv(1):
-            sock.close()
             return None
         elapsed = (time.perf_counter() - started) * 1000
-        sock.close()
         return int(round(elapsed))
-    except (OSError, ssl.SSLError):
+    except (OSError, ssl.SSLError, UnicodeError):
         return None
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
 
 def ping_endpoint(
