@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from dma2ray import sysproxy
+from dma2box import sysproxy
 
 SCHEMA = "org.gnome.system.proxy"
 GETS = {

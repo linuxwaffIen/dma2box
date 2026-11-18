@@ -90,7 +90,7 @@ def http_ping(host: str, port: int, use_tls: bool = False, timeout: float = 4.0)
         host_header = f"[{host}]" if ":" in host else host.encode("idna").decode("ascii")
         sock.sendall(
             f"HEAD / HTTP/1.1\r\nHost: {host_header}\r\n"
-            "User-Agent: dma2ray\r\nConnection: close\r\n\r\n".encode("ascii")
+            "User-Agent: dma2box\r\nConnection: close\r\n\r\n".encode("ascii")
         )
         if not sock.recv(1):
             return None

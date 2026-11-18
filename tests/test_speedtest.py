@@ -5,7 +5,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from dma2ray.speedtest import SpeedResult, _address_block, socks5_connect, speed_test
+from dma2box.speedtest import SpeedResult, _address_block, socks5_connect, speed_test
 
 
 def _recv_exact(sock: socket.socket, size: int) -> bytes:
@@ -104,7 +104,7 @@ class Socks5Server:
 
 
 class _PayloadHandler(BaseHTTPRequestHandler):
-    payload = b"dma2ray-speed-test" * 100_000  # ~2 MB
+    payload = b"dma2box-speed-test" * 100_000  # ~2 MB
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib naming
         self.send_response(200)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from dma2ray.vless import VlessError, parse_vless
+from dma2box.vless import VlessError, parse_vless
 
 UUID = "11111111-2222-3333-4444-555555555555"
 
@@ -25,12 +25,14 @@ class ParseVlessTests(unittest.TestCase):
         self.assertEqual(profile.host_header, "cdn.example.com")
         self.assertEqual(profile.path, "/ws")
         self.assertEqual(profile.alpn, ["h2", "http/1.1"])
-        stream = profile.to_xray_stream()
-        self.assertEqual(stream["network"], "ws")
-        self.assertEqual(stream["security"], "tls")
-        self.assertEqual(stream["wsSettings"]["host"], "cdn.example.com")
-        self.assertEqual(stream["tlsSettings"]["serverName"], "cdn.example.com")
-        self.assertEqual(stream["tlsSettings"]["fingerprint"], "chrome")
+        self.assertEqual(profile._singbox_transport(), {
+            "type": "ws", "path": "/ws", "headers": {"Host": "cdn.example.com"},
+        })
+        tls = profile._singbox_tls()
+        assert tls is not None
+        self.assertEqual(tls["server_name"], "cdn.example.com")
+        self.assertEqual(tls["alpn"], ["h2", "http/1.1"])
+        self.assertEqual(tls["utls"]["fingerprint"], "chrome")
 
     def test_reality_profile(self) -> None:
         uri = (
@@ -43,84 +45,73 @@ class ParseVlessTests(unittest.TestCase):
         self.assertEqual(profile.public_key, "public-key")
         self.assertEqual(profile.short_id, "0123")
         self.assertEqual(profile.flow, "xtls-rprx-vision")
-        stream = profile.to_xray_stream()
-        self.assertEqual(stream["realitySettings"]["publicKey"], "public-key")
-        self.assertEqual(stream["realitySettings"]["shortId"], "0123")
-        outbound = profile.to_xray_outbound()
-        self.assertEqual(
-            outbound["settings"]["vnext"][0]["users"][0]["flow"],
-            "xtls-rprx-vision",
-        )
+        tls = profile._singbox_tls()
+        assert tls is not None
+        self.assertEqual(tls["reality"]["public_key"], "public-key")
+        self.assertEqual(tls["reality"]["short_id"], "0123")
+        outbound = profile.to_singbox_outbound()
+        self.assertEqual(outbound["flow"], "xtls-rprx-vision")
 
     def test_transport_variants(self) -> None:
-        cases = {
-            "grpc": f"vless://{UUID}@example.com:443?type=grpc&serviceName=svc",
-            "httpupgrade": (
-                f"vless://{UUID}@example.com:443?type=httpupgrade"
-                "&host=example.com&path=%2Fup"
-            ),
-            "xhttp": (
-                f"vless://{UUID}@example.com:443?type=xhttp"
-                "&host=example.com&path=%2Fx&mode=packet-up"
-            ),
-            "kcp": (
-                f"vless://{UUID}@example.com:443?type=kcp"
-                "&headerType=wechat-video&seed=abc"
-            ),
-            "tcp-http": (
-                f"vless://{UUID}@example.com:443?type=tcp"
-                "&headerType=http&host=a.example.com,b.example.com&path=%2Fh"
-            ),
-        }
-        grpc = parse_vless(cases["grpc"])
-        self.assertEqual(grpc.to_xray_stream()["grpcSettings"]["serviceName"], "svc")
+        grpc = parse_vless(f"vless://{UUID}@example.com:443?type=grpc&serviceName=svc")
+        self.assertEqual(grpc._singbox_transport(), {
+            "type": "grpc", "service_name": "svc",
+        })
 
-        upgrade = parse_vless(cases["httpupgrade"])
-        self.assertEqual(
-            upgrade.to_xray_stream()["httpupgradeSettings"],
-            {"path": "/up", "host": "example.com"},
+        upgrade = parse_vless(
+            f"vless://{UUID}@example.com:443?type=httpupgrade"
+            "&host=example.com&path=%2Fup"
         )
+        self.assertEqual(upgrade._singbox_transport(), {
+            "type": "httpupgrade", "path": "/up", "host": "example.com",
+        })
 
-        xhttp = parse_vless(cases["xhttp"])
-        self.assertEqual(
-            xhttp.to_xray_stream()["xhttpSettings"],
-            {"path": "/x", "host": "example.com", "mode": "packet-up"},
+        # Парсеры принимают эти транспорты, но outbound должен отказать.
+        for transport in ("xhttp", "splithttp", "kcp", "mkcp"):
+            with self.subTest(transport=transport):
+                profile = parse_vless(
+                    f"vless://{UUID}@example.com:443?type={transport}&path=%2Fx"
+                )
+                with self.assertRaises(VlessError) as ctx:
+                    profile.to_singbox_outbound()
+                self.assertIn("sing-box", str(ctx.exception))
+
+        tcp_http = parse_vless(
+            f"vless://{UUID}@example.com:443?type=tcp"
+            "&headerType=http&host=a.example.com&path=%2Fh"
         )
+        with self.assertRaises(VlessError) as ctx:
+            tcp_http.to_singbox_outbound()
+        self.assertIn("sing-box", str(ctx.exception))
 
-        kcp = parse_vless(cases["kcp"])
-        self.assertEqual(
-            kcp.to_xray_stream()["kcpSettings"],
-            {"header": {"type": "wechat-video"}, "seed": "abc"},
-        )
+    def test_http2_transport_is_supported(self) -> None:
+        for transport in ("http", "h2", "http2"):
+            with self.subTest(transport=transport):
+                profile = parse_vless(
+                    f"vless://{UUID}@example.com:443?type={transport}"
+                    "&security=tls&path=%2Fh2&host=example.com"
+                )
+                self.assertEqual(profile.network, "http")
+                self.assertEqual(profile._singbox_transport(), {
+                    "type": "http", "path": "/h2", "host": ["example.com"],
+                })
 
-        tcp_http = parse_vless(cases["tcp-http"])
-        header = tcp_http.to_xray_stream()["tcpSettings"]["header"]
-        self.assertEqual(header["type"], "http")
-        self.assertEqual(
-            header["request"]["headers"]["Host"],
-            ["a.example.com", "b.example.com"],
-        )
-
-    def test_raw_is_mapped_to_tcp(self) -> None:
+    def test_raw_is_plain_tcp(self) -> None:
         profile = parse_vless(f"vless://{UUID}@example.com:443?type=raw")
         self.assertEqual(profile.network, "raw")
-        self.assertEqual(profile.to_xray_stream()["network"], "tcp")
+        self.assertIsNone(profile._singbox_transport())
 
     def test_ipv6_address(self) -> None:
         profile = parse_vless(f"vless://{UUID}@[2001:db8::1]:8443?type=tcp")
         self.assertEqual(profile.address, "2001:db8::1")
         self.assertEqual(profile.endpoint, "[2001:db8::1]:8443")
-        self.assertEqual(
-            profile.to_xray_outbound()["settings"]["vnext"][0]["address"],
-            "2001:db8::1",
-        )
+        self.assertEqual(profile.to_singbox_outbound()["server"], "2001:db8::1")
 
     def test_address_override(self) -> None:
-        profile = parse_vless(f"vless://{UUID}@example.com:443?type=tcp")
-        outbound = profile.to_xray_outbound("203.0.113.7")
-        self.assertEqual(
-            outbound["settings"]["vnext"][0]["address"], "203.0.113.7"
-        )
+        outbound = parse_vless(
+            f"vless://{UUID}@example.com:443?type=tcp"
+        ).to_singbox_outbound("203.0.113.7")
+        self.assertEqual(outbound["server"], "203.0.113.7")
 
     def test_name_fallback(self) -> None:
         profile = parse_vless(f"vless://{UUID}@example.com:443")
@@ -149,18 +140,18 @@ class ParseVlessTests(unittest.TestCase):
                 with self.assertRaises(VlessError):
                     parse_vless(uri)
 
-    def test_removed_transports(self) -> None:
-        for transport in ("http", "h2", "http2", "quic"):
-            with self.subTest(transport=transport):
-                with self.assertRaises(VlessError) as context:
-                    parse_vless(
-                        f"vless://{UUID}@example.com:443?type={transport}"
-                    )
-                self.assertIn("Xray 26", str(context.exception))
+    def test_removed_transport(self) -> None:
+        with self.assertRaises(VlessError) as ctx:
+            parse_vless(f"vless://{UUID}@example.com:443?type=quic")
+        self.assertIn("sing-box", str(ctx.exception))
 
     def test_splithttp_alias(self) -> None:
         profile = parse_vless(f"vless://{UUID}@example.com:443?type=splithttp")
         self.assertEqual(profile.network, "xhttp")
+
+    def test_mkcp_alias(self) -> None:
+        profile = parse_vless(f"vless://{UUID}@example.com:443?type=mkcp&seed=abc")
+        self.assertEqual(profile.network, "kcp")
 
 
 if __name__ == "__main__":

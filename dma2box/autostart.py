@@ -14,19 +14,19 @@ AUTOSTART_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
 def _command() -> str:
     """Команда автозапуска: скомпилированный бинарник либо исходники."""
     candidates = [
-        shutil.which("dma2ray"),
+        shutil.which("dma2box"),
         # Сборка из исходников (./build.sh).
-        str(paths.PROJECT_ROOT / "dist" / "dma2ray.dist" / "dma2ray"),
+        str(paths.PROJECT_ROOT / "dist" / "dma2box.dist" / "dma2box"),
         # Скомпилированный бинарник: PROJECT_ROOT — его dist-каталог.
-        str(paths.PROJECT_ROOT / "dma2ray"),
+        str(paths.PROJECT_ROOT / "dma2box"),
     ]
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return f"{shlex.quote(candidate)} --minimized"
-    # Запуск из дерева исходников: python -m dma2ray.
+    # Запуск из дерева исходников: python -m dma2box.
     return (
         f'env PYTHONPATH="{paths.PROJECT_ROOT}" '
-        f"{shlex.quote(sys.executable)} -m dma2ray --minimized"
+        f"{shlex.quote(sys.executable)} -m dma2box --minimized"
     )
 
 
@@ -37,7 +37,7 @@ def desktop_entry() -> str:
             "Type=Application",
             "Version=1.0",
             f"Name={paths.APP_TITLE}",
-            "Comment=VLESS client with Xray TUN support",
+            "Comment=VLESS client with sing-box TUN support",
             f"Exec={_command()}",
             f"Icon={paths.ICON_NAME}",
             "Terminal=false",

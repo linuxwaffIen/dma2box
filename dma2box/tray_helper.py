@@ -40,7 +40,7 @@ class Tray:
         self.running = True
 
         indicator = AppIndicator.Indicator.new(
-            "dma2ray", icon, AppIndicator.IndicatorCategory.APPLICATION_STATUS
+            "dma2box", icon, AppIndicator.IndicatorCategory.APPLICATION_STATUS
         )
         indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self.indicator = indicator
@@ -63,7 +63,7 @@ class Tray:
         indicator.set_menu(menu)
 
         try:
-            indicator.set_title("Dma2ray")
+            indicator.set_title("Dma2box")
         except Exception:
             pass
 
@@ -116,14 +116,14 @@ class Tray:
         profile = str(message.get("profile") or "")
         if state == "running":
             self.toggle_item.set_label("Отключиться")
-            self._set_icon("network-vpn-symbolic", "Dma2ray — подключено")
+            self._set_icon("network-vpn-symbolic", "Dma2box — подключено")
         elif state == "starting":
             self.toggle_item.set_label("Подключение…")
-            self._set_icon("network-vpn-symbolic", "Dma2ray — подключение")
+            self._set_icon("network-vpn-symbolic", "Dma2box — подключение")
         else:
             self.toggle_item.set_label("Подключиться")
-            self._set_icon("network-offline-symbolic", "Dma2ray — отключено")
-        title = "Dma2ray"
+            self._set_icon("network-offline-symbolic", "Dma2box — отключено")
+        title = "Dma2box"
         if profile:
             title += f" — {profile}"
         try:
@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--socket", required=True)
     parser.add_argument("--icon", default="network-vpn-symbolic")
-    parser.add_argument("--label", default="Dma2ray")
+    parser.add_argument("--label", default="Dma2box")
     args = parser.parse_args(argv)
 
     if not Gtk.init_check([])[0]:

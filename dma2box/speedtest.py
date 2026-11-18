@@ -119,7 +119,7 @@ def speed_test(
         request = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {parts.hostname}\r\n"
-            "User-Agent: dma2ray/0.2\r\n"
+            "User-Agent: dma2box/0.2\r\n"
             "Accept: */*\r\n"
             "Connection: close\r\n"
             "\r\n"

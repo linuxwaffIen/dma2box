@@ -14,18 +14,10 @@ from .accent_ui import AccentMixin, themed_button
 from . import autostart, paths, sysproxy
 from .core import CoreManager, CoreStatus, find_core
 from .flags import flag_for
-from .installer import(
-    HY_ASSETS,
-    ASSETS_XRAY,
-    SUPPORTED_ARCHS,
-    asset_name,
-    current_arch,
-    install_core,
-    install_hysteria,
-)
+from .installer import SUPPORTED_ARCHS, current_arch, install_core
 from .ping import PING_TYPE_LABELS, PING_TYPES, ping_endpoint
 from .speedtest import SpeedResult, speed_test
-from .state import KERNEL_MODES, LOG_LEVELS, MODES, Profile, Store
+from .state import LOG_LEVELS, MODES, Profile, Store
 from .subscriptions import FetchResult, fetch_and_parse, parse_subscription
 from .sysproxy import SysProxyError
 from .tray import TrayController
@@ -37,12 +29,6 @@ MODE_LABELS = (
     "Системный прокси",
     "ВПН (TUN, нужен root)",
 )
-KERNEL_MODE_LABELS = {
-    "auto": "Автовыбор (по протоколу)",
-    "xray": "Xray-core",
-    "amnezia-xray": "Amnezia Xray",
-}
-
 NAV_TRANSITION_DURATION_MS = 220
 
 SCHEMES = {
@@ -86,7 +72,7 @@ def _pick_icon(theme: Gtk.IconTheme | None, *candidates: str) -> str:
 
 
 def _accent_icon(widget: Gtk.Widget) -> Gtk.Widget:
-    widget.add_css_class("dma2ray-accent-icon")
+    widget.add_css_class("dma2box-accent-icon")
     return widget
 
 
@@ -189,7 +175,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self._refresh_all()
         self._update_status(self._core.status)
         if find_core(self.store) is None:
-            self._toast("Xray-core не найден — откройте меню и выберите «Ядра»")
+            self._toast("sing-box не найден — откройте меню и выберите «Ядро»")
         self.connect("close-request", self._on_close_request)
         self._try_start_tray(silent=True)
         if self.store.settings.get("auto_update_subs", False):
@@ -326,7 +312,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         sections = Gio.Menu()
         sections.append("Главная", "win.show-home")
         sections.append("Серверы", "win.show-servers")
-        sections.append("Ядра", "win.show-cores")
+        sections.append("Ядро", "win.show-cores")
         sections.append("Настройки", "win.settings")
         menu.append_section(None, sections)
         menu.append("Диагностика сети и DNS", "win.inspect-network")
@@ -467,7 +453,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         box.append(self.home_detail)
         theme = self._icon_theme()
         self.big_icon = Gtk.Image.new_from_icon_name(
-            _pick_icon(theme, "dma2ray-shield-symbolic", "network-vpn-symbolic", "security-high-symbolic")
+            _pick_icon(theme, "dma2box-shield-symbolic", "network-vpn-symbolic", "security-high-symbolic")
         )
         self.big_button = themed_button(65.0)
         self.server_card = themed_button(16.0)
@@ -507,7 +493,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self._set_pill(self.card_latency, None, visible=False)
         card_right.append(self.card_latency)
         next_icon = Gtk.Image.new_from_icon_name("go-next-symbolic")
-        next_icon.add_css_class("dma2ray-symbolic")
+        next_icon.add_css_class("dma2box-symbolic")
         card_right.append(next_icon)
         self.server_card.set_child(card)
         card.append(card_right)
@@ -526,13 +512,13 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         )
         self.quick_entry = Adw.EntryRow(title="vless://… или URL подписки")
         quick_suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        quick_button = Gtk.Button.new_from_icon_name("dma2ray-import-symbolic")
+        quick_button = Gtk.Button.new_from_icon_name("dma2box-import-symbolic")
         _accent_icon(quick_button)
         quick_button.add_css_class("flat")
         quick_button.set_tooltip_text("Добавить и подключить")
         quick_button.connect("clicked", self._quick_connect)
         quick_suffix.append(quick_button)
-        qr_button = Gtk.Button.new_from_icon_name("dma2ray-qr-symbolic")
+        qr_button = Gtk.Button.new_from_icon_name("dma2box-qr-symbolic")
         _accent_icon(qr_button)
         qr_button.add_css_class("flat")
         qr_button.set_tooltip_text("Импортировать из QR-файла")
@@ -544,7 +530,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         box.append(self.quick_group)
         self.speed_group = Adw.PreferencesGroup(title="Скорость и задержка")
         speed_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        speed_icon = _pick_icon(theme, "dma2ray-speed-symbolic", "network-transmit-receive-symbolic")
+        speed_icon = _pick_icon(theme, "dma2box-speed-symbolic", "network-transmit-receive-symbolic")
         self.speed_button = Gtk.Button.new_from_icon_name(speed_icon)
         _accent_icon(self.speed_button)
         self.speed_button.add_css_class("flat")
@@ -566,7 +552,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         page = Adw.PreferencesPage()
         self.profiles_group = Adw.PreferencesGroup(title="Серверы")
         profile_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        self.sort_button = Gtk.Button.new_from_icon_name("dma2ray-sort-symbolic")
+        self.sort_button = Gtk.Button.new_from_icon_name("dma2box-sort-symbolic")
         _accent_icon(self.sort_button)
         self.sort_button.add_css_class("flat")
         self.sort_button.set_tooltip_text("Сортировать по задержке")
@@ -574,7 +560,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         profile_actions.append(self.sort_button)
         ping_icon = _pick_icon(
             theme,
-            "dma2ray-speed-symbolic",
+            "dma2box-speed-symbolic",
             "network-cellular-signal-excellent-symbolic",
             "network-wireless-signal-excellent-symbolic",
             "network-transmit-receive-symbolic",
@@ -586,13 +572,13 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self.ping_all_button.set_tooltip_text("Проверить задержку всех серверов")
         self.ping_all_button.connect("clicked", lambda *_: self._ping_all())
         profile_actions.append(self.ping_all_button)
-        add_profile_button = Gtk.Button.new_from_icon_name("dma2ray-add-symbolic")
+        add_profile_button = Gtk.Button.new_from_icon_name("dma2box-add-symbolic")
         _accent_icon(add_profile_button)
         add_profile_button.add_css_class("flat")
         add_profile_button.set_tooltip_text("Добавить профиль")
         add_profile_button.connect("clicked", lambda *_: self._add_profile_dialog())
         profile_actions.append(add_profile_button)
-        import_file_button = Gtk.Button.new_from_icon_name("dma2ray-import-symbolic")
+        import_file_button = Gtk.Button.new_from_icon_name("dma2box-import-symbolic")
         _accent_icon(import_file_button)
         import_file_button.add_css_class("flat")
         import_file_button.set_tooltip_text("Импортировать профили из файла")
@@ -602,7 +588,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         page.add(self.profiles_group)
         self.subs_group = Adw.PreferencesGroup(title="Подписки")
         sub_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        self.update_subs_button = Gtk.Button.new_from_icon_name("dma2ray-refresh-symbolic")
+        self.update_subs_button = Gtk.Button.new_from_icon_name("dma2box-refresh-symbolic")
         _accent_icon(self.update_subs_button)
         self.update_subs_button.add_css_class("flat")
         self.update_subs_button.set_tooltip_text("Обновить все подписки")
@@ -610,7 +596,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             "clicked", lambda *_: self._update_all_subscriptions()
         )
         sub_actions.append(self.update_subs_button)
-        add_sub_button = Gtk.Button.new_from_icon_name("dma2ray-add-symbolic")
+        add_sub_button = Gtk.Button.new_from_icon_name("dma2box-add-symbolic")
         _accent_icon(add_sub_button)
         add_sub_button.add_css_class("flat")
         add_sub_button.set_tooltip_text("Добавить подписку")
@@ -661,7 +647,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         http_row.set_digits(0)
         http_row.connect("notify::value", lambda row, _p: self._settings_port("http_port", row))
         connection.add(http_row)
-        log_row = Adw.ComboRow(title="Уровень журнала Xray")
+        log_row = Adw.ComboRow(title="Уровень журнала sing-box")
         log_row.set_model(Gtk.StringList.new(list(LOG_LEVELS)))
         current_log = str(self.store.settings.get("log_level", "warning"))
         log_row.set_selected(LOG_LEVELS.index(current_log) if current_log in LOG_LEVELS else 2)
@@ -722,7 +708,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         interface.add(timeout_row)
         ping_type_row = Adw.ComboRow(
             title="Тип пинга",
-            subtitle="Для Hysteria и WireGuard используется ICMP, так как они работают по UDP",
+            subtitle="Для Hysteria 2 используется ICMP, так как она работает по UDP",
             model=Gtk.StringList.new([PING_TYPE_LABELS[k] for k in PING_TYPES]),
         )
         current_pt = str(self.store.settings.get("ping_type", "tcp"))
@@ -746,7 +732,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         startup = Adw.PreferencesGroup(title="Запуск и трей")
         autostart_row = Adw.SwitchRow(
             title="Автозапуск при входе",
-            subtitle="Запускать Dma2ray вместе с сеансом",
+            subtitle="Запускать Dma2box вместе с сеансом",
         )
         autostart_row.set_active(autostart.is_enabled())
         autostart_row.connect("notify::active", self._settings_autostart)
@@ -778,8 +764,8 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         page.add(startup)
         diagnostics = Adw.PreferencesGroup(title="Диагностика")
         log_action = Adw.ActionRow(
-            title="Общий журнал ядер",
-            subtitle="Xray · Amnezia Xray · Hysteria 2",
+            title="Журнал sing-box",
+            subtitle="Лог ядра и root-helper'а",
         )
         log_action.set_activatable(True)
         log_action.connect("activated", lambda *_: self._show_log())
@@ -838,14 +824,14 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             return
 
         dialog = Adw.Dialog()
-        dialog.set_title("Ядра")
+        dialog.set_title("Ядро")
         dialog.set_presentation_mode(Adw.DialogPresentationMode.BOTTOM_SHEET)
         _apply_dialog_size(dialog, 480, 640)
 
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
         header.set_title_widget(
-            Adw.WindowTitle(title="Ядра", subtitle=f"{current_arch()} · v{paths.VERSION}")
+            Adw.WindowTitle(title="Ядро", subtitle=f"{current_arch()} · v{paths.VERSION}")
         )
         close_button = Gtk.Button(label="Готово")
         close_button.connect("clicked", lambda *_: dialog.close())
@@ -1143,9 +1129,9 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             row.connect(
                 "activated", lambda *_args, pid=profile.id: self._select_profile(pid)
             )
-            check = Gtk.Image.new_from_icon_name("dma2ray-check-symbolic")
-            check.add_css_class("dma2ray-symbolic")
-            check.add_css_class("dma2ray-accent-icon")
+            check = Gtk.Image.new_from_icon_name("dma2box-check-symbolic")
+            check.add_css_class("dma2box-symbolic")
+            check.add_css_class("dma2box-accent-icon")
             check.set_visible(profile.id == selected_id)
             row.add_prefix(check)
             flag = flag_for(profile.name, parsed.address if parsed else "")
@@ -1200,9 +1186,9 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
                 subtitle = f"{count} профилей · обновлено {_fmt_time(sub.updated_at)}"
             row = Adw.ActionRow(title=sub.name, subtitle=subtitle)
             row.set_subtitle_lines(2)
-            icon = Gtk.Image.new_from_icon_name("dma2ray-subscription-symbolic")
-            icon.add_css_class("dma2ray-symbolic")
-            icon.add_css_class("dma2ray-accent-icon")
+            icon = Gtk.Image.new_from_icon_name("dma2box-subscription-symbolic")
+            icon.add_css_class("dma2box-symbolic")
+            icon.add_css_class("dma2box-accent-icon")
             row.add_prefix(icon)
             if sub.id in self._updating_subs:
                 spinner = Gtk.Spinner()
@@ -1297,22 +1283,22 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             subtitle = f"{profile.name} · {mode}" if profile else mode
             self.window_title.set_subtitle("Подключено")
             self._set_connect_button(
-                "Отключиться", "dma2ray-stop-symbolic", destructive=True
+                "Отключиться", "dma2box-stop-symbolic", destructive=True
             )
             self.home_status.set_text("Подключено")
             self.home_detail.set_text(subtitle)
         elif state == "starting":
-            subtitle = status.detail or "Запуск Xray…"
+            subtitle = status.detail or "Запуск sing-box…"
             self.window_title.set_subtitle("Подключение…")
             self._set_connect_button(
-                "Подключение…", "dma2ray-speed-symbolic", sensitive=False
+                "Подключение…", "dma2box-speed-symbolic", sensitive=False
             )
             self.home_status.set_text("Подключение…")
             self.home_detail.set_text(subtitle)
         elif state == "error":
             first = (status.error or "Неизвестная ошибка").splitlines()[0]
             self.window_title.set_subtitle("Ошибка")
-            self._set_connect_button("Повторить", "dma2ray-shield-symbolic")
+            self._set_connect_button("Повторить", "dma2box-shield-symbolic")
             self.home_status.set_text("Ошибка")
             self.home_detail.set_text(first)
         else:
@@ -1322,7 +1308,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             else:
                 subtitle = "Выберите профиль или добавьте новый"
             self.window_title.set_subtitle("Отключено")
-            self._set_connect_button("Подключиться", "dma2ray-shield-symbolic")
+            self._set_connect_button("Подключиться", "dma2box-shield-symbolic")
             self.home_status.set_text("Отключено")
             self.home_detail.set_text(subtitle)
         self._update_server_card(status)
@@ -1384,7 +1370,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         sensitive: bool = True,
         destructive: bool = False,
     ) -> None:
-        chosen = _pick_icon(self._icon_theme(), icon, "dma2ray-shield-symbolic", "network-vpn-symbolic")
+        chosen = _pick_icon(self._icon_theme(), icon, "dma2box-shield-symbolic", "network-vpn-symbolic")
         self.big_icon.set_from_icon_name(chosen)
         self.big_button.set_sensitive(sensitive)
         for css in ("connect-idle", "connect-busy", "connect-active"):
@@ -2049,44 +2035,34 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             return "Не найден — нажмите «Скачать»"
         return str(found)
 
-    @staticmethod
-    def _kernel_subtitle(kernel_type: str, arch: str | None = None) -> str:
-        path = paths.core_path(kernel_type, arch)
-        if path.is_file():
-            return str(path)
-        return "Не найден — нажмите «Скачать»"
-
     def _install_core_for_arch(
-        self, arch: str, btn: "Gtk.Button", row: "Adw.ActionRow | None" = None,
-        kernel_type: str = "xray",
+        self, arch: str, btn: Gtk.Button, row: "Adw.ActionRow | None" = None,
     ) -> None:
         if self._core.is_running:
             self._toast("Сначала отключитесь, затем обновите ядро")
             return
         btn.set_sensitive(False)
         btn.set_label("Загрузка…")
-        key = f"{arch}:{kernel_type}"
-        del_btn = self._core_delete_buttons.get(key)
+        del_btn = self._core_delete_buttons.get(arch)
         if del_btn is not None:
             del_btn.set_sensitive(False)
+
         def progress(fraction: float, message: str) -> None:
-            GLib.idle_add(self._core_progress, fraction, message, arch, kernel_type)
+            GLib.idle_add(self._core_progress, fraction, message, arch)
+
         def worker() -> None:
             try:
-                if kernel_type == "hysteria":
-                    path = install_hysteria(progress, arch)
-                else:
-                    path = install_core(progress, arch, kernel_type)
+                path = install_core(progress, arch)
             except Exception as exc:
-                GLib.idle_add(self._core_install_done, None, str(exc), arch, kernel_type)
+                GLib.idle_add(self._core_install_done, None, str(exc), arch)
             else:
-                GLib.idle_add(self._core_install_done, str(path), None, arch, kernel_type)
+                GLib.idle_add(self._core_install_done, str(path), None, arch)
+
         threading.Thread(target=worker, name="core-install", daemon=True).start()
 
     def _delete_core_for_arch(
         self,
         arch: str,
-        kernel_type: str,
         title: str,
         btn: Gtk.Button,
         del_btn: Gtk.Button,
@@ -2110,8 +2086,8 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
 
         def on_response(_dialog: Adw.MessageDialog, response: str) -> None:
             if response == "delete":
-                target_dir = paths.core_dir(kernel_type, arch)
-                target_bin = paths.core_path(kernel_type, arch)
+                target_dir = paths.core_dir(arch)
+                target_bin = paths.core_path(arch)
                 if target_dir.is_dir():
                     shutil.rmtree(target_dir, ignore_errors=True)
                 elif target_bin.is_file():
@@ -2124,20 +2100,16 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
                 btn.set_label("Скачать")
                 btn.set_tooltip_text(f"Скачать {title} для {arch}")
                 del_btn.set_visible(False)
-                key = f"{arch}:{kernel_type}"
-                if key in self._core_hints:
-                    row.set_subtitle(self._core_hints[key])
+                if arch in self._core_hints:
+                    row.set_subtitle(self._core_hints[arch])
                 self._toast(f"{title} удалено")
             dialog.destroy()
 
         dialog.connect("response", on_response)
         dialog.present()
 
-    def _core_progress(
-        self, fraction: float, message: str, arch: str, kernel_type: str
-    ) -> bool:
-        key = f"{arch}:{kernel_type}"
-        row = self._core_tabs.get(key)
+    def _core_progress(self, fraction: float, message: str, arch: str) -> bool:
+        row = self._core_tabs.get(arch)
         if row is not None:
             row.set_subtitle(f"{message} {int(fraction * 100)}%")
         return False
@@ -2147,36 +2119,28 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         path: str | None,
         error: str | None,
         arch: str | None = None,
-        kernel_type: str = "xray",
     ) -> bool:
-        key = f"{arch}:{kernel_type}" if arch is not None else None
-        row = self._core_tabs.get(key) if key else None
-        btn = self._core_buttons.get(key) if key else None
-        del_btn = self._core_delete_buttons.get(key) if key else None
+        row = self._core_tabs.get(arch) if arch is not None else None
+        btn = self._core_buttons.get(arch) if arch is not None else None
+        del_btn = self._core_delete_buttons.get(arch) if arch is not None else None
         if row is not None:
-            row.set_subtitle(self._core_hints.get(key, ""))
-        installed = bool(path) or (arch is not None and paths.core_path(kernel_type, arch).is_file())
+            row.set_subtitle(self._core_hints.get(arch, ""))
+        installed = bool(path) or (arch is not None and paths.core_path(arch).is_file())
         if btn is not None:
             btn.set_sensitive(True)
             btn.set_label("Обновить" if installed else "Скачать")
         if del_btn is not None:
             del_btn.set_sensitive(True)
             del_btn.set_visible(installed)
-        label = {
-            "xray": "Xray-core",
-            "amnezia-xray": "Amnezia Xray",
-            "hysteria": "Hysteria",
-        }.get(kernel_type, kernel_type)
         if path:
-            if kernel_type == "xray":
-                self.store.set_setting("core_path", path)
-            self._toast(f"{label} установлен")
+            self.store.set_setting("core_path", path)
+            self._toast("sing-box установлен")
         else:
-            self._toast(f"Не удалось установить {label}: {error}")
+            self._toast(f"Не удалось установить sing-box: {error}")
         return False
-    
+
     def _choose_core(self) -> None:
-        dialog = Gtk.FileDialog(title="Выбрать бинарник Xray")
+        dialog = Gtk.FileDialog(title="Выбрать бинарник sing-box")
         dialog.open(self, None, self._core_file_chosen)
 
     def _core_file_chosen(self, dialog: Gtk.FileDialog, result) -> None:
@@ -2190,29 +2154,21 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         if not path:
             return
         self.store.set_setting("core_path", path)
-        if hasattr(self, "core_row"):
-            self.core_row.set_subtitle(self._core_subtitle())
-        self._toast("Путь к Xray сохранён")
+        self._toast("Путь к sing-box сохранён")
 
     def _check_core_async(self) -> None:
-        xray = self.store.core_path()
+        core = self.store.core_path()
         def worker() -> None:
             import subprocess
             try:
                 result = subprocess.run(
-                    [str(xray), "version"], capture_output=True, text=True, timeout=15
+                    [str(core), "version"], capture_output=True, text=True, timeout=15
                 )
                 text = (result.stdout + result.stderr).strip() or f"код {result.returncode}"
             except Exception as exc:
                 text = str(exc)
-            GLib.idle_add(self._toast, f"Xray: {text.splitlines()[0]}")
+            GLib.idle_add(self._toast, f"sing-box: {text.splitlines()[0]}")
         threading.Thread(target=worker, name="core-check", daemon=True).start()
-
-    def _open_data_dir(self, *_args) -> None:
-        try:
-            Gio.AppInfo.launch_default_for_uri(paths.DATA_DIR.as_uri(), None)
-        except GLib.Error as exc:
-            self._toast(f"Не удалось открыть каталог: {exc.message}")
 
     # -------------------------------------------------------------------- log
     def _show_log(self) -> None:
@@ -2220,14 +2176,14 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             self._log_dialog.present(self)
             return
         dialog = Adw.Dialog()
-        dialog.set_title("Общий журнал ядер")
+        dialog.set_title("Журнал sing-box")
         _apply_dialog_size(dialog, 760, 560)
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
         header.set_title_widget(
             Adw.WindowTitle(
-                title="Общий журнал ядер",
-                subtitle="Xray · Amnezia Xray · Hysteria 2",
+                title="Журнал sing-box",
+                subtitle="Лог ядра и root-helper'а",
             )
         )
         refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
@@ -2275,92 +2231,58 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
 
     # ------------------------------------------------------------------ cores
     def _build_core_group(self) -> Adw.PreferencesGroup:
-        """Показывает выбор и управление ядрами на отдельной вкладке."""
+        """Управление единственным ядром — sing-box."""
         machine = current_arch()
         group = Adw.PreferencesGroup(
-            title="Ядра",
-            description=f"Ядра для {machine}. Загрузка проверяется контрольной суммой.",
+            title="Ядро",
+            description=f"sing-box для {machine}. Загрузка проверяется контрольной суммой.",
         )
-        kernel_mode_row = Adw.ComboRow(
-            title="Активное ядро",
-            subtitle="Автовыбор подбирает ядро под протокол профиля",
-            model=Gtk.StringList.new([KERNEL_MODE_LABELS[k] for k in KERNEL_MODES]),
-        )
-        current_km = str(self.store.settings.get("kernel_mode", "auto"))
-        kernel_mode_row.set_selected(
-            KERNEL_MODES.index(current_km) if current_km in KERNEL_MODES else 0
-        )
-        kernel_mode_row.connect(
-            "notify::selected",
-            lambda row, _p: self.store.set_setting(
-                "kernel_mode", KERNEL_MODES[row.get_selected()]
-            ),
-        )
-        group.add(kernel_mode_row)
-
         self._core_tabs.clear()
         self._core_buttons.clear()
         self._core_delete_buttons.clear()
-        kernels = (
-            ("xray", "Xray-core", "Основное ядро для VLESS, VMess и других протоколов", "dma2ray-server-symbolic"),
-            ("amnezia-xray", "Amnezia Xray", "Поддержка AmneziaWG и дополнительных режимов", "dma2ray-shield-symbolic"),
-            ("hysteria", "Hysteria 2", "Отдельное ядро для протокола Hysteria 2", "dma2ray-globe-symbolic"),
+        supported = machine in SUPPORTED_ARCHS
+        subtitle = "Статическая сборка для Linux" if supported else f"Недоступно для {machine}"
+        self._core_hints[machine] = subtitle
+        row = Adw.ActionRow(title="sing-box", subtitle=subtitle)
+        icon = Gtk.Image.new_from_icon_name("dma2box-server-symbolic")
+        icon.set_pixel_size(22)
+        icon.add_css_class("kernel-icon")
+        row.add_prefix(icon)
+
+        actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        actions_box.set_valign(Gtk.Align.CENTER)
+        installed = paths.core_path(machine).is_file()
+        button = Gtk.Button(label="Обновить" if installed else "Скачать")
+        button.add_css_class("suggested-action")
+        button.add_css_class("kernel-btn")
+        button.set_valign(Gtk.Align.CENTER)
+        button.set_sensitive(supported)
+        action = "Обновить" if installed else "Скачать"
+        button.set_tooltip_text(f"{action} sing-box для {machine}")
+        button.connect(
+            "clicked",
+            lambda *_, b=button, r=row: self._install_core_for_arch(machine, b, r),
         )
-        for kernel_type, title, hint, icon_name in kernels:
-            if kernel_type == "hysteria":
-                supported = machine in HY_ASSETS
-            else:
-                try:
-                    asset_name(kernel_type, machine)
-                    supported = machine in SUPPORTED_ARCHS
-                except RuntimeError:
-                    supported = False
+        actions_box.append(button)
 
-            key = f"{machine}:{kernel_type}"
-            subtitle = hint if supported else f"Недоступно для {machine}"
-            self._core_hints[key] = subtitle
-            row = Adw.ActionRow(title=title, subtitle=subtitle)
-            icon = Gtk.Image.new_from_icon_name(icon_name)
-            icon.set_pixel_size(22)
-            icon.add_css_class("kernel-icon")
-            row.add_prefix(icon)
-
-            actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            actions_box.set_valign(Gtk.Align.CENTER)
-            installed = paths.core_path(kernel_type, machine).is_file()
-            button = Gtk.Button(label="Обновить" if installed else "Скачать")
-            button.add_css_class("suggested-action")
-            button.add_css_class("kernel-btn")
-            button.set_valign(Gtk.Align.CENTER)
-            button.set_sensitive(supported)
-            action = "Обновить" if installed else "Скачать"
-            button.set_tooltip_text(f"{action} {title} для {machine}")
-            button.connect(
-                "clicked",
-                lambda *_, b=button, r=row, kt=kernel_type: self._install_core_for_arch(
-                    machine, b, r, kt
-                ),
-            )
-            actions_box.append(button)
-
-            delete_button = Gtk.Button.new_from_icon_name("dma2ray-trash-symbolic")
-            delete_button.add_css_class("flat")
-            delete_button.add_css_class("destructive-action")
-            delete_button.set_valign(Gtk.Align.CENTER)
-            delete_button.set_tooltip_text(f"Удалить {title}")
-            delete_button.set_visible(installed)
-            delete_button.connect(
-                "clicked",
-                lambda *_, kt=kernel_type, t=title, b=button, db=delete_button, r=row: self._delete_core_for_arch(
-                    machine, kt, t, b, db, r
-                ),
-            )
-            actions_box.append(delete_button)
-            row.add_suffix(actions_box)
-            self._core_tabs[key] = row
-            self._core_buttons[key] = button
-            self._core_delete_buttons[key] = delete_button
-            group.add(row)
+        delete_button = Gtk.Button.new_from_icon_name("dma2box-trash-symbolic")
+        delete_button.add_css_class("flat")
+        delete_button.add_css_class("destructive-action")
+        delete_button.set_valign(Gtk.Align.CENTER)
+        delete_button.set_tooltip_text("Удалить sing-box")
+        delete_button.set_visible(installed)
+        delete_button.connect(
+            "clicked",
+            lambda *_, b=button, db=delete_button, r=row: self._delete_core_for_arch(
+                machine, "sing-box", b, db, r
+            ),
+        )
+        actions_box.append(delete_button)
+        row.add_suffix(actions_box)
+        self._core_tabs[machine] = row
+        self._core_buttons[machine] = button
+        self._core_delete_buttons[machine] = delete_button
+        group.add(row)
         return group
 
     # ------------------------------------------------------------------ about
@@ -2369,15 +2291,14 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         dialog = Adw.AboutDialog(
             application_name=paths.APP_TITLE,
             application_icon=paths.ICON_NAME,
-            developer_name="Dma2ray contributors",
+            developer_name="Dma2box contributors",
             version=paths.VERSION,
             comments=(
                 "Клиент VLESS для Linux на GTK4/libadwaita.\n"
-                "Ядро — Xray-core, включая нативный TUN-режим.\n"
-                "Клиент создан на базе Xray — благодарности разработчику "
-                "этого ядра: https://github.com/XTLS/Xray-core"
+                "Ядро — sing-box с нативным TUN-режимом auto_route.\n"
+                "Спасибо проекту sing-box: https://github.com/SagerNet/sing-box"
             ),
-            website="https://github.com/XTLS/Xray-core",
+            website="https://github.com/SagerNet/sing-box",
             license_type=Gtk.License.GPL_3_0_ONLY,
         )
         dialog.present(self)

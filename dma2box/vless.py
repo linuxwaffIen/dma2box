@@ -10,31 +10,40 @@ class VlessError(ValueError):
     pass
 
 
+# Транспорты, которые понимает sing-box. xhttp и kcp парсер принимает, но при
+# сборке конфига ссылка отклоняется с понятной ошибкой (см. _singbox_transport).
 SUPPORTED_NETWORKS = {
     "tcp",
     "raw",
     "ws",
     "grpc",
     "httpupgrade",
+    "http",
     "xhttp",
     "kcp",
 }
+NETWORK_ALIASES = {
+    "split-http": "xhttp",
+    "splithttp": "xhttp",
+    "mkcp": "kcp",
+    "h2": "http",
+    "http2": "http",
+}
+# Транспорты, которых нет в sing-box: такие ссылки отклоняются при подключении.
+UNSUPPORTED_TRANSPORTS = {
+    "xhttp": (
+        "Транспорт xhttp/splithttp не поддерживается sing-box. "
+        "Попросите у провайдера ссылку с type=ws или type=grpc."
+    ),
+    "kcp": (
+        "Транспорт mKCP не поддерживается sing-box. "
+        "Попросите у провайдера ссылку с type=ws или type=grpc."
+    ),
+}
 REMOVED_NETWORKS = {
-    "http": (
-        "Транспорт HTTP/2 удалён в Xray 26. Попросите у провайдера ссылку "
-        "с type=xhttp."
-    ),
-    "h2": (
-        "Транспорт HTTP/2 удалён в Xray 26. Попросите у провайдера ссылку "
-        "с type=xhttp."
-    ),
-    "http2": (
-        "Транспорт HTTP/2 удалён в Xray 26. Попросите у провайдера ссылку "
-        "с type=xhttp."
-    ),
     "quic": (
-        "Транспорт QUIC удалён в Xray 26. Попросите у провайдера ссылку "
-        "с type=xhttp."
+        "Транспорт QUIC не поддерживается sing-box. "
+        "Попросите у провайдера ссылку с type=tcp или type=ws."
     ),
 }
 SUPPORTED_SECURITY = {"none", "tls", "reality", "xtls"}
@@ -92,135 +101,127 @@ class VlessProfile:
     def detail(self) -> str:
         return f"{self.endpoint} · {self.transport_label} · {self.security_label}"
 
-    def to_xray_stream(self) -> dict:
-        network = "tcp" if self.network == "raw" else self.network
-        stream: dict = {"network": network}
+    def _singbox_tls(self) -> dict | None:
         security = "tls" if self.security == "xtls" else self.security
-        if security in ("tls", "reality"):
-            stream["security"] = security
         if security == "tls":
-            tls: dict = {"serverName": self.sni or self.address}
+            tls: dict = {"enabled": True, "server_name": self.sni or self.address}
             if self.allow_insecure:
-                tls["allowInsecure"] = True
+                tls["insecure"] = True
             if self.alpn:
                 tls["alpn"] = list(self.alpn)
             if self.fingerprint:
-                tls["fingerprint"] = self.fingerprint
-            stream["tlsSettings"] = tls
-        elif security == "reality":
-            stream["realitySettings"] = {
-                "serverName": self.sni or self.address,
-                "fingerprint": self.fingerprint or "chrome",
-                "publicKey": self.public_key,
-                "shortId": self.short_id,
-                "spiderX": self.spider_x or "/",
-            }
-
-        if network == "ws":
-            ws: dict = {"path": self.path or "/"}
-            if self.host_header:
-                ws["host"] = self.host_header
-            stream["wsSettings"] = ws
-        elif network == "httpupgrade":
-            upgrade: dict = {"path": self.path or "/"}
-            if self.host_header:
-                upgrade["host"] = self.host_header
-            stream["httpupgradeSettings"] = upgrade
-        elif network == "grpc":
-            grpc: dict = {"serviceName": self.service_name}
-            if self.mode.lower() in ("multi", "multimode"):
-                grpc["multiMode"] = True
-            stream["grpcSettings"] = grpc
-        elif network == "xhttp":
-            xhttp: dict = {"path": self.path or "/"}
-            if self.host_header:
-                xhttp["host"] = self.host_header
-            if self.mode:
-                xhttp["mode"] = self.mode
-            stream["xhttpSettings"] = xhttp
-        elif network == "kcp":
-            kcp: dict = {"header": {"type": self.header_type or "none"}}
-            if self.seed:
-                kcp["seed"] = self.seed
-            stream["kcpSettings"] = kcp
-        elif network == "tcp" and self.header_type == "http":
-            request: dict = {"path": [self.path or "/"]}
-            if self.host_header:
-                request["headers"] = {"Host": _split_hosts(self.host_header)}
-            stream["tcpSettings"] = {"header": {"type": "http", "request": request}}
-
-        return stream
-
-    def to_xray_outbound(self, address_override: str | None = None) -> dict:
-        address = address_override or self.address
-        if self.protocol == "trojan":
-            outbound: dict = {
-                "tag": "proxy",
-                "protocol": "trojan",
-                "settings": {
-                    "server": address,
-                    "server_port": self.port,
-                    "password": self.uuid,
-                },
-            }
-            outbound["streamSettings"] = self.to_xray_stream()
-            return outbound
-        if self.protocol == "shadowsocks":
+                tls["utls"] = {"enabled": True, "fingerprint": self.fingerprint}
+            return tls
+        if security == "reality":
             return {
-                "tag": "proxy",
-                "protocol": "shadowsocks",
-                "settings": {
-                    "server": address,
-                    "server_port": self.port,
-                    "method": self.security or "aes-128-gcm",
-                    "password": self.uuid,
+                "enabled": True,
+                "server_name": self.sni or self.address,
+                "utls": {
+                    "enabled": True,
+                    "fingerprint": self.fingerprint or "chrome",
+                },
+                "reality": {
+                    "enabled": True,
+                    "public_key": self.public_key,
+                    "short_id": self.short_id,
                 },
             }
-        if self.protocol == "wireguard":
-            return {
-                "tag": "proxy",
-                "protocol": "wireguard",
-                "settings": {
-                    "secret": self.uuid,
-                },
-            }
-        if self.protocol == "hysteria" or self.protocol == "hysteria2":
-            return {
-                "tag": "proxy",
-                "protocol": "hysteria",
-                "settings": {
-                    "server": address,
-                    "port": self.port,
-                    "password": self.uuid,
-                },
-            }
+        return None
+
+    def _singbox_transport(self) -> dict | None:
+        if self.network in UNSUPPORTED_TRANSPORTS:
+            raise VlessError(UNSUPPORTED_TRANSPORTS[self.network])
+        if self.network in ("tcp", "raw"):
+            if self.header_type == "http":
+                raise VlessError(
+                    "Обфускация TCP с headerType=http не поддерживается sing-box. "
+                    "Попросите у провайдера ссылку с type=ws или type=grpc."
+                )
+            return None
+        if self.network == "ws":
+            transport: dict = {"type": "ws", "path": self.path or "/"}
+            if self.host_header:
+                transport["headers"] = {"Host": self.host_header}
+            return transport
+        if self.network == "grpc":
+            return {"type": "grpc", "service_name": self.service_name}
+        if self.network == "httpupgrade":
+            transport = {"type": "httpupgrade", "path": self.path or "/"}
+            if self.host_header:
+                transport["host"] = self.host_header
+            return transport
+        if self.network == "http":
+            transport = {"type": "http", "path": self.path or "/"}
+            if self.host_header:
+                transport["host"] = _split_hosts(self.host_header)
+            return transport
+        raise VlessError(f"Неподдерживаемый транспорт: {self.network}")
+
+    def to_singbox_outbound(self, address_override: str | None = None) -> dict:
         if self.protocol == "amnezia":
-            return {
-                "tag": "proxy",
-                "protocol": "amnezia",
-                "settings": {
-                    "server": address,
-                    "port": self.port,
-                    "password": self.uuid,
-                },
-            }
-        user: dict = {"id": self.uuid, "encryption": "none"}
-        if self.flow:
-            user["flow"] = self.flow
-        return {
+            raise VlessError(
+                "Протокол Amnezia не поддерживается sing-box. "
+                "Попросите у провайдера ссылку vless:// или trojan://."
+            )
+        if self.protocol == "wireguard":
+            raise VlessError(
+                "WireGuard не поддерживается: sing-boxу нужны приватный ключ и "
+                "адреса, которых нет в ссылке wireguard://."
+            )
+        address = address_override or self.address
+        outbound: dict = {
             "tag": "proxy",
-            "protocol": "vless",
-            "settings": {
-                "vnext": [
-                    {
-                        "address": address,
-                        "port": self.port,
-                        "users": [user],
-                    }
-                ]
-            },
-            "streamSettings": self.to_xray_stream(),
+            "server": address,
+            "server_port": int(self.port),
         }
+
+        if self.protocol == "shadowsocks":
+            outbound["type"] = "shadowsocks"
+            outbound["method"] = self.security or "aes-128-gcm"
+            outbound["password"] = self.uuid
+            return outbound
+
+        if self.protocol in ("hysteria", "hysteria2"):
+            outbound["type"] = "hysteria2"
+            outbound["password"] = self.uuid
+            tls: dict = {"enabled": True, "server_name": self.sni or self.address}
+            if self.allow_insecure:
+                tls["insecure"] = True
+            if self.alpn:
+                tls["alpn"] = list(self.alpn)
+            outbound["tls"] = tls
+            obfs = self.extra.get("obfs", "")
+            if obfs:
+                outbound["obfs"] = {
+                    "type": obfs,
+                    "password": self.extra.get("obfs-password", ""),
+                }
+            return outbound
+
+        transport = self._singbox_transport()
+        tls = self._singbox_tls()
+        if tls:
+            outbound["tls"] = tls
+        if transport:
+            outbound["transport"] = transport
+
+        if self.protocol == "trojan":
+            outbound["type"] = "trojan"
+            outbound["password"] = self.uuid
+        elif self.protocol == "vmess":
+            outbound["type"] = "vmess"
+            outbound["uuid"] = self.uuid
+            outbound["security"] = self.extra.get("scy") or "auto"
+            try:
+                outbound["alter_id"] = int(self.extra.get("aid") or 0)
+            except ValueError:
+                outbound["alter_id"] = 0
+        else:
+            outbound["type"] = "vless"
+            outbound["uuid"] = self.uuid
+            if self.flow:
+                outbound["flow"] = self.flow
+        return outbound
 
 
 def parse_trojan(uri: str) -> VlessProfile:
@@ -232,26 +233,39 @@ def parse_trojan(uri: str) -> VlessProfile:
     password = unquote(auth)
     if not password:
         raise VlessError("В ссылке отсутствует пароль Trojan")
-    hostport = hostport.split("?", 1)[0]
-    host, _, port_str = hostport.rpartition(":")
+    hostpart, _, query = hostport.partition("?")
+    host, _, port_str = hostpart.rpartition(":")
     if not host:
         raise VlessError("В ссылке отсутствует адрес сервера")
     try:
         port = int(port_str or "443")
     except ValueError as exc:
         raise VlessError(f"Некорректный порт: {exc}") from exc
-    profile = replace(
+    q = {key.lower(): value for key, value in parse_qsl(query, keep_blank_values=True)}
+    network = _normalize_network(_first(q, "type", "network", default="tcp"))
+    security = _first(q, "security", default="tls").lower()
+    if security not in SUPPORTED_SECURITY:
+        raise VlessError(f"Неподдерживаемый тип безопасности: {security}")
+    return replace(
         VlessProfile(
             uuid=password,
             address=host,
             port=port,
             name=f"trojan://{host}:{port}",
-            security="tls",
-            network="tcp",
+            security=security,
+            network=network,
+            sni=_first(q, "sni", "servername"),
+            alpn=[item for item in _first(q, "alpn").replace(" ", ",").split(",") if item],
+            fingerprint=_first(q, "fp", "fingerprint"),
+            allow_insecure=_as_bool(_first(q, "allowinsecure", "insecure")),
+            host_header=_first(q, "host"),
+            path=_first(q, "path", default="/") or "/",
+            service_name=_first(q, "servicename", "service"),
+            header_type=_first(q, "headertype", "header", default="none").lower() or "none",
+            extra=q,
         ),
         protocol="trojan",
     )
-    return profile
 
 
 def _b64decode_pad(text: str) -> bytes:
@@ -335,19 +349,47 @@ def parse_vmess(uri: str) -> VlessProfile:
         raise VlessError("Ссылка должна начинаться с vmess://")
     payload = uri[len("vmess://"):]
     padded = payload + "=" * (-len(payload) % 4)
-    raw = base64.b64decode(padded, altchars="-_", validate=False)
-    data = json.loads(raw.decode("utf-8"))
+    try:
+        raw = base64.b64decode(padded, altchars="-_", validate=False)
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise VlessError(f"Некорректная vmess:// ссылка: {exc}") from exc
+    if not isinstance(data, dict):
+        raise VlessError("Некорректная vmess:// ссылка: ожидается JSON-объект")
     uuid = str(data.get("id") or data.get("uuid") or "")
     address = str(data.get("add") or data.get("address") or "")
-    port = int(data.get("port") or 443)
+    try:
+        port = int(data.get("port") or 443)
+    except (TypeError, ValueError) as exc:
+        raise VlessError("Некорректный порт в vmess:// ссылке") from exc
+    network = _normalize_network(str(data.get("net") or "tcp"))
+    tls_flag = str(data.get("tls") or "").lower()
+    security = (
+        "reality" if tls_flag == "reality"
+        else "tls" if tls_flag in ("tls", "xtls") else "none"
+    )
+    path = str(data.get("path") or "/") or "/"
     return replace(
         VlessProfile(
             uuid=uuid,
             address=address,
             port=port,
             name=str(data.get("ps") or f"{address}:{port}"),
+            security=security,
+            network=network,
+            sni=str(data.get("sni") or ""),
+            fingerprint=str(data.get("fp") or ""),
+            allow_insecure=bool(data.get("allowInsecure", False)),
+            host_header=str(data.get("host") or ""),
+            path=path,
+            service_name=path if network == "grpc" else "",
+            header_type=str(data.get("type") or "none").lower() or "none",
+            extra={
+                "scy": str(data.get("scy") or data.get("security") or "auto"),
+                "aid": str(data.get("aid") or data.get("alterId") or 0),
+            },
         ),
-        protocol="vless",
+        protocol="vmess",
     )
 
 
@@ -363,8 +405,11 @@ def parse_hysteria2(uri: str) -> VlessProfile:
         port = int(port_str or "443")
     except ValueError as exc:
         raise VlessError(f"Некорректный порт: {exc}") from exc
-    q = {k: v for k, v in parse_qsl(query, keep_blank_values=True)}
+    q = {key.lower(): value for key, value in parse_qsl(query, keep_blank_values=True)}
     password = q.get("p") or q.get("password") or ""
+    obfs = q.get("obfs", "")
+    if obfs and obfs != "salamander":
+        raise VlessError(f"Неподдерживаемая обфускация: {obfs}")
     return replace(
         VlessProfile(
             uuid=password,
@@ -372,6 +417,9 @@ def parse_hysteria2(uri: str) -> VlessProfile:
             port=port,
             name=f"hysteria2://{host}:{port}",
             security="none",
+            sni=q.get("sni", ""),
+            allow_insecure=_as_bool(q.get("insecure", "")),
+            extra={"obfs": obfs, "obfs-password": q.get("obfs-password", "")},
         ),
         protocol="hysteria",
     )
@@ -451,6 +499,16 @@ def _as_bool(value: str) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _normalize_network(network: str) -> str:
+    value = network.strip().lower()
+    value = NETWORK_ALIASES.get(value, value)
+    if value in REMOVED_NETWORKS:
+        raise VlessError(REMOVED_NETWORKS[value])
+    if value not in SUPPORTED_NETWORKS:
+        raise VlessError(f"Неподдерживаемый транспорт: {value}")
+    return value
+
+
 def parse_vless(uri: str) -> VlessProfile:
     uri = uri.strip()
     if not uri.lower().startswith("vless://"):
@@ -481,13 +539,7 @@ def parse_vless(uri: str) -> VlessProfile:
 
     query = {key.lower(): value for key, value in parse_qsl(parts.query, keep_blank_values=True)}
 
-    network = _first(query, "type", "network", default="tcp").lower()
-    if network in ("splithttp", "split-http"):
-        network = "xhttp"
-    if network in REMOVED_NETWORKS:
-        raise VlessError(REMOVED_NETWORKS[network])
-    if network not in SUPPORTED_NETWORKS:
-        raise VlessError(f"Неподдерживаемый транспорт: {network}")
+    network = _normalize_network(_first(query, "type", "network", default="tcp"))
 
     security = _first(query, "security", default="none").lower()
     if security not in SUPPORTED_SECURITY:

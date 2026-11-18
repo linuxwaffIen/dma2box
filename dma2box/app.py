@@ -14,7 +14,7 @@ from .state import Store
 from .window import MainWindow
 
 
-class Dma2rayApplication(Adw.Application):
+class Dma2boxApplication(Adw.Application):
     def __init__(self, *, minimized: bool = False, pending_uris: list[str] | None = None) -> None:
         super().__init__(
             application_id=paths.APP_ID,
@@ -100,7 +100,7 @@ def _usage(program: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv if argv is None else argv)
     if not args:
-        args = ["dma2ray"]
+        args = ["dma2box"]
     minimized = False
     imports: list[str] = []
     open_args: list[str] = []
@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
 
     GLib.set_prgname(paths.APP_NAME)
     GLib.set_application_name(paths.APP_TITLE)
-    app = Dma2rayApplication(minimized=minimized)
+    app = Dma2boxApplication(minimized=minimized)
     # Pass imports as file arguments so a running instance receives them
     # through do_open() instead of silently activating without the URI.
     return app.run([args[0], *imports, *open_args])

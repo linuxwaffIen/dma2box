@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from dma2ray.flags import flag_for
+from dma2box.flags import flag_for
 
 
 class FlagDetectionTests(unittest.TestCase):

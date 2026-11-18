@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Small privileged helper for Xray TUN mode.
+"""Привилегированный helper для TUN-режима sing-box.
 
-Started through pkexec. It owns the root Xray process, writes its log and
-reverts routes by stopping Xray gracefully. It only accepts commands from the
-user who started it and only uses paths fixed at startup.
+Запускается через pkexec, держит root-процесс sing-box и пишет его лог.
+sing-box сам создаёт tun0, ставит маршруты и redirect-правила (auto_route,
+auto_redirect), поэтому helper не трогает ip rule, таблицы маршрутизации и
+фаервол. Команды принимаются только от запустившего пользователя и только по
+фиксированным путям.
 """
 
 from __future__ import annotations
@@ -25,34 +27,7 @@ import threading
 import time
 from pathlib import Path
 
-
-TUN_NAME = "tun0"
-ROUTE_TABLE = "42424"
-XRAY_MARK = "0xd2a2/0xffffffff"
-PRIVATE_PREFIXES_V4 = (
-    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-    "169.254.0.0/16", "100.64.0.0/10", "127.0.0.0/8",
-    "224.0.0.0/4", "255.255.255.255/32",
-)
-PRIVATE_PREFIXES_V6 = ("::1/128", "fc00::/7", "fe80::/10", "ff00::/8")
-
-
-def _ip_binary() -> str:
-    executable = shutil.which("ip", path="/usr/sbin:/usr/bin:/sbin:/bin")
-    if not executable:
-        raise OSError("Не найдена команда ip")
-    return executable
-
-
-def _ip_run(family: str, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    command = [_ip_binary(), family, *args]
-    proc = subprocess.run(
-        command, capture_output=True, text=True, timeout=8, check=False,
-        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"},
-    )
-    if check and proc.returncode:
-        raise OSError(f"{' '.join(command)}: {proc.stderr.strip() or proc.stdout.strip()}")
-    return proc
+ALLOWED_ROOT_KEYS = {"log", "dns", "inbounds", "outbounds", "route"}
 
 
 def _log_tail(path: Path, limit: int = 16000) -> str:
@@ -83,169 +58,24 @@ def _under(path: Path, root: Path) -> bool:
 
 
 class Runner:
-    def __init__(self, xray: Path, config: Path, log_path: Path, uid: int, gid: int) -> None:
-        self.xray = xray
+    def __init__(self, core: Path, config: Path, log_path: Path, uid: int, gid: int) -> None:
+        self.core = core
         self.config = config
         self.log_path = log_path
         self.uid = uid
         self.gid = gid
         self.proc: subprocess.Popen | None = None
         self.lock = threading.Lock()
-        self.runtime_dir = Path("/run/dma2ray") / str(uid)
+        self.runtime_dir = Path("/run/dma2box") / str(uid)
         self.staged_config: Path | None = None
-        self.routing_cleanup: list[tuple[str, ...]] = []
-
-    def _remove_routing(self) -> None:
-        commands = list(self.routing_cleanup)
-        state_path = self.runtime_dir / "routing-cleanup.json"
-        if not commands:
-            try:
-                directory_info = self.runtime_dir.lstat()
-            except FileNotFoundError:
-                directory_info = None
-            if directory_info is not None and (
-                not stat.S_ISDIR(directory_info.st_mode)
-                or directory_info.st_uid != 0
-                or directory_info.st_mode & 0o077
-            ):
-                raise OSError("Небезопасный каталог состояния policy routing")
-            try:
-                fd = os.open(state_path, os.O_RDONLY | os.O_NOFOLLOW)
-            except FileNotFoundError:
-                fd = None
-            except OSError:
-                fd = None
-            if fd is not None:
-                try:
-                    info = os.fstat(fd)
-                    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
-                        raise OSError("Небезопасный файл состояния policy routing")
-                    with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as handle:
-                        stored = json.load(handle)
-                    if not isinstance(stored, list):
-                        raise OSError("Некорректный файл состояния policy routing")
-                    commands = [tuple(map(str, item)) for item in stored]
-                    for command in commands:
-                        if (len(command) < 4 or command[0] not in ("-4", "-6")
-                                or command[1:3] not in (("route", "del"), ("rule", "del"))):
-                            raise OSError("В файле состояния есть недопустимая команда")
-                finally:
-                    os.close(fd)
-        for command in reversed(commands):
-            _ip_run(command[0], *command[1:], check=False)
-        self.routing_cleanup.clear()
-        try:
-            state_path.unlink()
-        except FileNotFoundError:
-            pass
-
-    def _save_routing_state(self, commands: list[tuple[str, ...]]) -> None:
-        self.runtime_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        directory_info = self.runtime_dir.lstat()
-        if (not stat.S_ISDIR(directory_info.st_mode) or directory_info.st_uid != 0
-                or directory_info.st_mode & 0o077):
-            raise OSError("Небезопасный каталог состояния policy routing")
-        fd = os.open(
-            self.runtime_dir / "routing-cleanup.json",
-            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
-            0o600,
-        )
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
-                json.dump(commands, handle)
-                handle.flush()
-                os.fsync(fd)
-        finally:
-            os.close(fd)
-
-    @staticmethod
-    def _choose_rule_priorities(family: str, count: int) -> list[int]:
-        proc = _ip_run(family, "rule", "list")
-        used = set()
-        for line in proc.stdout.splitlines():
-            head = line.strip().split(":", 1)[0]
-            if head.isdigit():
-                used.add(int(head))
-        for start in range(1, 32766 - count):
-            priorities = list(range(start, start + count))
-            if not used.intersection(priorities):
-                return priorities
-        raise OSError(f"Не удалось найти {count} свободных приоритетов ip rule ({family})")
-
-    def _configure_routing(self, staged_config: Path) -> None:
-        """Route unmarked host traffic through TUN; let marked Xray sockets use main."""
-        with staged_config.open("r", encoding="utf-8") as handle:
-            config = json.load(handle)
-        tun = next(
-            (item for item in config.get("inbounds", []) if item.get("tag") == "tun-in"),
-            None,
-        )
-        if not tun:
-            raise OSError("В конфиге нет tun-in")
-        settings = tun.get("settings", {})
-        if settings.get("name") != TUN_NAME:
-            raise OSError(f"Имя TUN должно быть {TUN_NAME}")
-        routes = settings.get("autoSystemRoutingTable", [])
-        if "0.0.0.0/0" not in routes:
-            raise OSError("В TUN-конфиге отсутствует маршрут IPv4 по умолчанию")
-        proxy = next(
-            (item for item in config.get("outbounds", []) if item.get("tag") == "proxy"),
-            None,
-        )
-        if not proxy or proxy.get("streamSettings", {}).get("sockopt", {}).get("mark") != int(XRAY_MARK.split("/")[0], 16):
-            raise OSError("Proxy outbound должен использовать зарезервированную routing mark")
-        families = [("-4", PRIVATE_PREFIXES_V4)]
-        if "::/0" in routes:
-            families.append(("-6", PRIVATE_PREFIXES_V6))
-
-        # Recover exact rules saved before the previous helper was interrupted.
-        self._remove_routing()
-
-        installed: list[tuple[str, ...]] = []
-        cleanup: list[tuple[str, ...]] = []
-        try:
-            for family, prefixes in families:
-                occupied = _ip_run(family, "route", "show", "table", ROUTE_TABLE)
-                if occupied.stdout.strip():
-                    raise OSError(f"Таблица маршрутизации {ROUTE_TABLE} уже занята ({family})")
-                cleanup.append((family, "route", "del", "default", "dev", TUN_NAME,
-                                "table", ROUTE_TABLE))
-
-                rules = [("fwmark", XRAY_MARK, "lookup", "main")]
-                rules.extend(
-                    ("to", prefix, "lookup", "main", "suppress_prefixlength", "0")
-                    for prefix in prefixes
-                )
-                rules.append(("lookup", ROUTE_TABLE))
-                priorities = self._choose_rule_priorities(family, len(rules))
-                for priority, rule in zip(priorities, rules):
-                    cleanup.append((family, "rule", "del", "priority", str(priority), *rule))
-            # Persist the cleanup plan before touching the live routing tables,
-            # so a helper SIGKILL can be repaired on the next start.
-            self._save_routing_state(cleanup)
-            for command in cleanup:
-                add = list(command)
-                add[2] = "add"
-                _ip_run(add[0], *add[1:])
-                installed.append(command)
-        except Exception:
-            for command in reversed(installed):
-                _ip_run(command[0], *command[1:], check=False)
-            try:
-                (self.runtime_dir / "routing-cleanup.json").unlink()
-            except FileNotFoundError:
-                pass
-            raise
-        self.routing_cleanup.extend(installed)
 
     def _stage_config(self) -> Path:
-        """Copy the user's generated JSON into a private root-owned runtime dir."""
-        parent = Path("/run/dma2ray")
+        """Скопировать сгенерированный JSON в закрытый root-каталог /run/dma2box."""
+        parent = Path("/run/dma2box")
         parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         parent_stat = parent.stat()
         if parent_stat.st_uid != 0 or parent_stat.st_mode & 0o022:
-            raise OSError("/run/dma2ray должен принадлежать root и не быть доступен для записи группе")
+            raise OSError("/run/dma2box должен принадлежать root и не быть доступен для записи группе")
         self.runtime_dir.mkdir(mode=0o700, exist_ok=True)
         runtime_stat = self.runtime_dir.stat()
         if runtime_stat.st_uid != 0 or runtime_stat.st_mode & 0o077:
@@ -264,7 +94,7 @@ class Runner:
                 chunks.append(chunk)
                 remaining -= len(chunk)
             if remaining == 0 and os.read(fd, 1):
-                raise OSError("Конфиг Xray превышает 2 MiB")
+                raise OSError("Конфиг sing-box превышает 2 MiB")
         finally:
             os.close(fd)
         raw = b"".join(chunks)
@@ -273,24 +103,12 @@ class Runner:
         except (ValueError, UnicodeDecodeError) as exc:
             raise OSError(f"Некорректный JSON конфига: {exc}") from exc
         if not isinstance(parsed, dict):
-            raise OSError("Корень конфига Xray должен быть объектом")
-        if set(parsed) - {"log", "inbounds", "outbounds", "dns", "routing"}:
+            raise OSError("Корень конфига sing-box должен быть объектом")
+        if set(parsed) - ALLOWED_ROOT_KEYS:
             raise OSError("В конфиге есть неподдерживаемые root-параметры")
-
-        def reject_file_inputs(value) -> None:
-            if isinstance(value, dict):
-                for key, item in value.items():
-                    if str(key).lower() in {
-                        "access", "error", "certificates", "keyfile", "privatekeyfile",
-                        "geodata", "geodatapath", "assetspath", "externalcontroller",
-                    }:
-                        raise OSError(f"В конфиге запрещено root-файловое поле: {key}")
-                    reject_file_inputs(item)
-            elif isinstance(value, list):
-                for item in value:
-                    reject_file_inputs(item)
-
-        reject_file_inputs(parsed)
+        # Пути к файлам обрабатывал бы root — запрещаем их в конфиге.
+        if isinstance(parsed.get("log"), dict) and parsed["log"].get("output"):
+            raise OSError("В конфиге запрещено поле log.output (запись файла от root)")
         fd, name = tempfile.mkstemp(prefix="config-", suffix=".json", dir=self.runtime_dir)
         staged = Path(name)
         try:
@@ -312,54 +130,11 @@ class Runner:
                 pass
             self.staged_config = None
 
-    def _backup_network_state(self) -> None:
-        commands = (
-            ("ip", "-4", "route", "show", "table", "all"),
-            ("ip", "-6", "route", "show", "table", "all"),
-        )
-        route_lines = []
-        for command in commands:
-            proc = subprocess.run(command, capture_output=True, text=True, timeout=8, check=False)
-            if proc.returncode:
-                raise OSError(f"Не удалось сохранить маршруты ({' '.join(command)}): {proc.stderr.strip()}")
-            route_lines.append(f"$ {' '.join(command)}\n{proc.stdout.rstrip()}")
-        rule_commands = (("ip", "rule", "list"), ("ip", "-6", "rule", "list"))
-        rule_lines = []
-        for command in rule_commands:
-            proc = subprocess.run(command, capture_output=True, text=True, timeout=8, check=False)
-            if proc.returncode:
-                raise OSError(f"Не удалось сохранить правила ({' '.join(command)}): {proc.stderr.strip()}")
-            rule_lines.append(f"$ {' '.join(command)}\n{proc.stdout.rstrip()}")
-        for name, content in (
-            ("/tmp/routes.before", "\n\n".join(route_lines) + "\n"),
-            ("/tmp/rules.before", "\n\n".join(rule_lines) + "\n"),
-        ):
-            try:
-                fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            except FileExistsError:
-                fd = os.open(name, os.O_WRONLY | os.O_NOFOLLOW)
-                info = os.fstat(fd)
-                if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, self.uid) or info.st_nlink != 1:
-                    os.close(fd)
-                    raise OSError(f"Небезопасный файл backup: {name}")
-                os.ftruncate(fd, 0)
-            try:
-                os.fchmod(fd, 0o600)
-                with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
-                    handle.write(content)
-                    handle.flush()
-                    os.fsync(fd)
-            finally:
-                os.close(fd)
-
     def status(self) -> dict:
         with self.lock:
             proc = self.proc
             running = bool(proc and proc.poll() is None)
             if proc is not None and not running:
-                # A crashed Xray must not leave host traffic pointed at a dead
-                # TUN until the user reconnects or exits the application.
-                self._remove_routing()
                 self._cleanup_config()
             return {
                 "ok": True,
@@ -372,10 +147,6 @@ class Runner:
     def start(self) -> dict:
         with self.lock:
             self._stop_locked()
-            try:
-                self._backup_network_state()
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                return {"ok": False, "error": f"TUN не запущен: не удалось сделать backup маршрутов: {exc}"}
             try:
                 config = self._stage_config()
             except (OSError, ValueError) as exc:
@@ -401,7 +172,7 @@ class Runner:
 
             try:
                 self.proc = subprocess.Popen(
-                    [str(self.xray), "run", "-c", str(config)],
+                    [str(self.core), "run", "-c", str(config)],
                     stdin=subprocess.DEVNULL,
                     stdout=log_handle,
                     stderr=subprocess.STDOUT,
@@ -416,14 +187,14 @@ class Runner:
             except OSError as exc:
                 log_handle.close()
                 self._cleanup_config()
-                return {"ok": False, "error": f"Не удалось запустить Xray: {exc}"}
+                return {"ok": False, "error": f"Не удалось запустить sing-box: {exc}"}
             finally:
                 try:
                     log_handle.close()
                 except Exception:
                     pass
 
-            # Give Xray a moment to create the TUN device and install routes.
+            # Даём sing-box время поднять TUN и установить маршруты.
             time.sleep(1.0)
             code = self.proc.poll()
             if code is not None:
@@ -432,15 +203,9 @@ class Runner:
                 self._cleanup_config()
                 return {
                     "ok": False,
-                    "error": f"Xray завершился с кодом {code}",
+                    "error": f"sing-box завершился с кодом {code}",
                     "log": tail,
                 }
-            try:
-                self._configure_routing(config)
-            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
-                self._stop_locked()
-                return {"ok": False, "error": f"Не удалось включить policy routing TUN: {exc}",
-                        "log": _log_tail(self.log_path)}
             return {
                 "ok": True,
                 "running": True,
@@ -457,7 +222,6 @@ class Runner:
         proc = self.proc
         self.proc = None
         if not proc or proc.poll() is not None:
-            self._remove_routing()
             self._cleanup_config()
             return
         try:
@@ -470,7 +234,6 @@ class Runner:
         deadline = time.monotonic() + 8.0
         while time.monotonic() < deadline:
             if proc.poll() is not None:
-                self._remove_routing()
                 self._cleanup_config()
                 return
             time.sleep(0.1)
@@ -485,7 +248,6 @@ class Runner:
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             pass
-        self._remove_routing()
         self._cleanup_config()
 
 
@@ -494,7 +256,7 @@ class Helper:
         self.socket_path = Path(args.socket)
         self.uid = int(args.uid)
         self.gid = int(args.gid)
-        self.runner = Runner(Path(args.xray), Path(args.config), Path(args.log), self.uid, self.gid)
+        self.runner = Runner(Path(args.core), Path(args.config), Path(args.log), self.uid, self.gid)
         self.server: socket.socket | None = None
         self.stop_event = threading.Event()
         self._validate_paths()
@@ -507,15 +269,19 @@ class Helper:
             home = Path(pwd.getpwuid(self.uid).pw_dir)
         except KeyError:
             home = Path("/root")
-        xray = self.runner.xray
-        if not xray.is_file() or not os.access(xray, os.X_OK):
-            raise SystemExit(f"Xray не найден или не исполняемый: {xray}")
-        binary_info = xray.stat()
+        core = self.runner.core
+        if not core.is_file() or not os.access(core, os.X_OK):
+            raise SystemExit(f"sing-box не найден или не исполняемый: {core}")
+        binary_info = core.stat()
         if binary_info.st_uid != 0 or binary_info.st_mode & 0o022:
-            raise SystemExit("Root может запускать только root-owned Xray, недоступный для записи группе/остальным")
-        allowed_roots = [Path("/usr/libexec/dma2ray"), Path("/usr/lib/dma2ray"), Path("/usr/local/lib/dma2ray")]
-        if not any(_under(xray, root) for root in allowed_roots):
-            raise SystemExit(f"Xray должен быть установлен в root-owned каталог приложения: {xray}")
+            raise SystemExit("Root может запускать только root-owned sing-box, недоступный для записи группе/остальным")
+        allowed_roots = [
+            Path("/usr/libexec/dma2box"),
+            Path("/usr/lib/dma2box"),
+            Path("/usr/local/lib/dma2box"),
+        ]
+        if not any(_under(core, root) for root in allowed_roots):
+            raise SystemExit(f"sing-box должен быть установлен в root-owned каталог приложения: {core}")
         if not _under(self.runner.config, home):
             raise SystemExit("Конфиг должен находиться в домашнем каталоге пользователя")
         if not _under(self.runner.log_path, home):
@@ -523,7 +289,7 @@ class Helper:
 
     @staticmethod
     def _network_diagnostics() -> dict:
-        """Read-only snapshot used before changing any TUN routes or rules."""
+        """Только чтение: снимок маршрутов, правил и слушателей для диагностики."""
         commands = {
             "ipv4_routes": ["ip", "-4", "route", "show", "table", "all"],
             "ipv6_routes": ["ip", "-6", "route", "show", "table", "all"],
@@ -572,12 +338,12 @@ class Helper:
         return {"ok": True, "diagnostics": result}
 
     def run(self) -> int:
-        if self.socket_path.parent != Path("/run/dma2ray") or self.socket_path.name != f"privileged-{self.uid}.sock":
-            raise SystemExit("Сокет helper должен находиться в /run/dma2ray")
+        if self.socket_path.parent != Path("/run/dma2box") or self.socket_path.name != f"privileged-{self.uid}.sock":
+            raise SystemExit("Сокет helper должен находиться в /run/dma2box")
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
         parent_info = self.socket_path.parent.stat()
         if parent_info.st_uid != 0 or parent_info.st_mode & 0o022:
-            raise SystemExit("/run/dma2ray должен принадлежать root и не быть доступен для записи группе")
+            raise SystemExit("/run/dma2box должен принадлежать root и не быть доступен для записи группе")
         try:
             old = self.socket_path.lstat()
         except FileNotFoundError:
@@ -611,8 +377,8 @@ class Helper:
                         client.close()
                     except OSError:
                         pass
-                # The app keeps one long-lived connection. Once it goes away,
-                # the app is gone too, so do not leave a root process behind.
+                # Приложение держит одно долгоживущее соединение. Когда оно
+                # закрылось, приложение ушло — не оставляем root-процесс.
                 break
         finally:
             self.runner.stop()
@@ -663,7 +429,7 @@ class Helper:
                         return
                     else:
                         response = {"ok": False, "error": "Неизвестная команда"}
-                except Exception as exc:  # keep the helper alive on unexpected errors
+                except Exception as exc:  # helper живёт дальше после ошибок команды
                     response = {"ok": False, "error": f"Внутренняя ошибка: {exc}"}
                 self._send(client, response)
         finally:
@@ -682,10 +448,10 @@ class Helper:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Privileged Xray helper for dma2ray")
+    parser = argparse.ArgumentParser(description="Privileged sing-box helper for dma2box")
     parser.add_argument("--inspect-network", action="store_true")
     parser.add_argument("--socket")
-    parser.add_argument("--xray")
+    parser.add_argument("--core")
     parser.add_argument("--config")
     parser.add_argument("--log")
     parser.add_argument("--uid")
@@ -700,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(Helper._network_diagnostics(), ensure_ascii=False))
         return 0
 
-    missing = [name for name in ("socket", "xray", "config", "log", "uid", "gid") if not getattr(args, name)]
+    missing = [name for name in ("socket", "core", "config", "log", "uid", "gid") if not getattr(args, name)]
     if missing:
         parser.error("missing required arguments: " + ", ".join("--" + name for name in missing))
 

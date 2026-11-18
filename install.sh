@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Установщик Dma2ray.
+# Установщик Dma2box.
 #
 # Примеры:
 #   ./install.sh                 # в ~/.local
@@ -9,8 +9,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_ID="io.github.dma2ray.Dma2ray"
-APP_NAME="dma2ray"
+APP_ID="io.github.dma2box.Dma2box"
+APP_NAME="dma2box"
 MODE="user"
 PREFIX="${PREFIX:-$HOME/.local}"
 ACTION="install"
@@ -27,8 +27,8 @@ usage() {
   -h, --help      показать эту справку
 
 Без --system файлы ставятся в ~/.local:
-  ~/.local/lib/dma2ray        код: бинарник (app/), исходники, данные
-  ~/.local/bin/dma2ray        симлинк на бинарник
+  ~/.local/lib/dma2box        код: бинарник (app/), исходники, данные
+  ~/.local/bin/dma2box        симлинк на бинарник
   ~/.local/share/applications   ярлык
   ~/.local/share/icons          иконка
 EOF
@@ -128,42 +128,42 @@ uninstall() {
 }
 
 install_app() {
-    local bin_src="$ROOT/dist/dma2ray.dist/dma2ray"
+    local bin_src="$ROOT/dist/dma2box.dist/dma2box"
     if [[ ! -x "$bin_src" ]]; then
         echo "Ошибка: бинарник не собран." >&2
         echo "Скомпилируйте исходники: ./build.sh" >&2
-        echo "  (результат: dist/dma2ray.dist/dma2ray)" >&2
+        echo "  (результат: dist/dma2box.dist/dma2box)" >&2
         exit 1
     fi
-    for source in "$bin_src" "$ROOT/dma2ray" "$ROOT/data/$APP_ID.desktop" "$ROOT/data/$APP_ID.svg"; do
+    for source in "$bin_src" "$ROOT/dma2box" "$ROOT/data/$APP_ID.desktop" "$ROOT/data/$APP_ID.svg"; do
         [[ -e "$source" ]] || { echo "Не найден файл: $source" >&2; exit 1; }
     done
 
     install -d "$APP_DIR" "$PREFIX/bin" "$DESKTOP_DIR" "$ICON_DIR"
-    rm -rf "$APP_DIR/dma2ray" "$APP_DIR/data" "$APP_DIR/app" "$APP_DIR/bin"
-    cp -a "$ROOT/dma2ray" "$APP_DIR/"
+    rm -rf "$APP_DIR/dma2box" "$APP_DIR/data" "$APP_DIR/app" "$APP_DIR/bin"
+    cp -a "$ROOT/dma2box" "$APP_DIR/"
     cp -a "$ROOT/data" "$APP_DIR/"
     # Скомпилированный бинарник с библиотеками, helper-скриптами и данными.
-    cp -a "$ROOT/dist/dma2ray.dist" "$APP_DIR/app"
+    cp -a "$ROOT/dist/dma2box.dist" "$APP_DIR/app"
     cp -f "$ROOT/LICENSE" "$APP_DIR/LICENSE" 2>/dev/null || true
     cp -f "$ROOT/README.md" "$APP_DIR/README.md" 2>/dev/null || true
     find "$APP_DIR" -type d -name __pycache__ -prune -exec rm -rf {} +
     find "$APP_DIR" -type f -name '*.pyc' -delete
 
-    # /prefix/bin/dma2ray — симлинк на бинарник (RPATH $ORIGIN переживает
+    # /prefix/bin/dma2box — симлинк на бинарник (RPATH $ORIGIN переживает
     # симлинк, библиотеки ищутся рядом с настоящим файлом).
-    ln -sfn "$APP_DIR/app/dma2ray" "$BIN"
+    ln -sfn "$APP_DIR/app/dma2box" "$BIN"
     install -m 0644 "$ROOT/data/$APP_ID.svg" "$ICON"
 
-    sed "s|^Exec=dma2ray$|Exec=$BIN|" \
+    sed "s|^Exec=dma2box$|Exec=$BIN|" \
         "$ROOT/data/$APP_ID.desktop" > "$DESKTOP"
     chmod 0644 "$DESKTOP"
     update_caches
     register_scheme
 
-    echo "Dma2ray установлен:"
+    echo "Dma2box установлен:"
     echo "  приложение: $APP_DIR"
-    echo "  бинарник:   $BIN -> $APP_DIR/app/dma2ray"
+    echo "  бинарник:   $BIN -> $APP_DIR/app/dma2box"
     echo "  ярлык:      $DESKTOP"
     if [[ "$MODE" == "user" && ":$PATH:" != *":$PREFIX/bin:"* ]]; then
         echo
@@ -171,7 +171,7 @@ install_app() {
         echo "Добавьте его в ~/.profile или запускайте приложение по полному пути."
     fi
     echo
-    echo "Ядро Xray можно скачать в «Настройках → Ядро → Скачать»"
+    echo "Ядро sing-box можно скачать в «Настройках → Ядро → Скачать»"
 }
 
 install_system_helper() {
@@ -183,64 +183,58 @@ install_system_helper() {
         return 0
     fi
 
-    local bin_src="$ROOT/dist/dma2ray.dist/dma2ray"
-    local priv_src="$ROOT/dma2ray/privileged.py"
+    local bin_src="$ROOT/dist/dma2box.dist/dma2box"
+    local priv_src="$ROOT/dma2box/privileged.py"
     [[ -x "$bin_src" ]] || { echo "Бинарник не собран: $bin_src" >&2; return 1; }
     [[ -f "$priv_src" ]] || { echo "Не найден priv-скрипт: $priv_src" >&2; return 1; }
 
-    local DIR=/usr/libexec/dma2ray
+    local DIR=/usr/libexec/dma2box
     local PY
     PY=$(command -v python3)
 
-    # TUN is a root process, so it must never execute the copy of Xray that
-    # the desktop user can replace. Pin the downloaded core in the root-owned
-    # helper directory during system installation.
+    # TUN-процесс работает от root, поэтому он не должен запускать бинарник,
+    # который может подменить пользователь. Закрепляем скачанный sing-box в
+    # root-owned каталоге хелпера при системной установке.
     local install_home="$HOME"
     if [[ -n "${SUDO_USER:-}" ]]; then
         install_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
     fi
     local data_home="${XDG_DATA_HOME:-$install_home/.local/share}"
-    local xray_src="${DMA2RAY_XRAY_BIN:-$data_home/dma2ray/bin/$(uname -m)/xray/xray}"
-    local amnezia_src="${DMA2RAY_AMNEZIA_XRAY_BIN:-$data_home/dma2ray/bin/$(uname -m)/amnezia/xray}"
+    local core_src="${DMA2BOX_CORE_BIN:-$data_home/dma2box/bin/$(uname -m)/sing-box/sing-box}"
 
     install -d -m 755 "$DIR"
-    install -m 755 "$bin_src" "$DIR/dma2ray"
+    install -m 755 "$bin_src" "$DIR/dma2box"
     install -m 755 "$priv_src" "$DIR/priv.py"
-    if [[ -n "$xray_src" && -x "$xray_src" ]]; then
-        install -o root -g root -m 755 "$xray_src" "$DIR/xray"
-        echo "Root-owned Xray installed: $DIR/xray"
+    if [[ -n "$core_src" && -x "$core_src" ]]; then
+        install -o root -g root -m 755 "$core_src" "$DIR/sing-box"
+        echo "Root-owned sing-box installed: $DIR/sing-box"
     else
-        echo "Xray не найден для root-owned установки. TUN пока отключён."
-        echo "Скачайте Xray в приложении и повторите: sudo DMA2RAY_XRAY_BIN=/path/to/xray ./install.sh --system"
-    fi
-    if [[ -n "$amnezia_src" && -x "$amnezia_src" ]]; then
-        install -d -o root -g root -m 755 "$DIR/amnezia"
-        install -o root -g root -m 755 "$amnezia_src" "$DIR/amnezia/xray"
-        echo "Root-owned Amnezia Xray installed: $DIR/amnezia/xray"
+        echo "sing-box не найден для root-owned установки. TUN пока отключён."
+        echo "Скачайте sing-box в приложении и повторите: sudo DMA2BOX_CORE_BIN=/path/to/sing-box ./install.sh --system"
     fi
 
-    cat > "$DIR/dma2ray-helper" <<EOF
+    cat > "$DIR/dma2box-helper" <<EOF
 #!/bin/sh
 exec $PY $DIR/priv.py "\$@"
 EOF
-    chmod 755 "$DIR/dma2ray-helper"
+    chmod 755 "$DIR/dma2box-helper"
 
-    cat > /usr/share/polkit-1/actions/org.dma2ray.run-core.policy <<'EOF'
+    cat > /usr/share/polkit-1/actions/org.dma2box.run-core.policy <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE policyconfig PUBLIC
  "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
 <policyconfig>
-  <vendor>Dma2ray</vendor>
-  <action id="org.dma2ray.run-core">
-    <description>Запуск ядра Dma2ray в режиме ВПН</description>
+  <vendor>Dma2box</vendor>
+  <action id="org.dma2box.run-core">
+    <description>Запуск ядра Dma2box в режиме ВПН</description>
     <message>Для режима ВПН (TUN) нужны права администратора</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/dma2ray/dma2ray-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/dma2box/dma2box-helper</annotate>
     <annotate key="org.freedesktop.policykit.exec.allow_gui">false</annotate>
   </action>
 </policyconfig>

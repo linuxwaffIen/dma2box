@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import sys
 
-from dma2ray.accent import ACCENT_PRESETS
-from dma2ray.colorscience import (
+from dma2box.accent import ACCENT_PRESETS
+from dma2box.colorscience import (
     TonalPalette,
     contrast_ratio,
     hex_to_rgb,

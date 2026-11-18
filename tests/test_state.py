@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dma2ray.state import DEFAULT_SETTINGS, Store
+from dma2box.state import DEFAULT_SETTINGS, Store
 
 UUID = "11111111-2222-3333-4444-555555555555"
 URI_1 = f"vless://{UUID}@example.com:443?type=ws#first"

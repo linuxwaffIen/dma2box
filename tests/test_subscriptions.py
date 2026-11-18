@@ -4,8 +4,8 @@ import base64
 import json
 import unittest
 
-from dma2ray.subscriptions import _decode_payload, parse_subscription
-from dma2ray.vless import (
+from dma2box.subscriptions import _decode_payload, parse_subscription
+from dma2box.vless import (
     VlessError,
     parse_hysteria2,
     parse_shadowsocks,
@@ -98,7 +98,7 @@ class SubscriptionTests(unittest.TestCase):
         payload = b64.b64encode(json.dumps(data).encode()).decode()
         uri = f"vmess://{payload}"
         profile = parse_vmess(uri)
-        self.assertEqual(profile.protocol, "vless")
+        self.assertEqual(profile.protocol, "vmess")
         self.assertEqual(profile.address, "example.com")
         self.assertEqual(profile.port, 443)
 

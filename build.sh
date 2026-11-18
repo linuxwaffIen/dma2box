@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Компиляция Dma2ray в единый бинарник (Nuitka, standalone-режим).
+# Компиляция Dma2box в единый бинарник (Nuitka, standalone-режим).
 #
-# Результат: dist/dma2ray.dist/dma2ray — самодостаточный ELF-бинарник
+# Результат: dist/dma2box.dist/dma2box — самодостаточный ELF-бинарник
 # (внутри каталога лежат библиотеки, helper-скрипты и данные).
 #
 # Запуск: ./build.sh
@@ -69,12 +69,12 @@ if ! patchelf_ok; then
 fi
 
 # Ограничение параллелизма/памяти для слабых машин (например QEMU-гость):
-#   DMA2RAY_JOBS=2 DMA2RAY_LOW_MEMORY=1 ./build.sh
+#   DMA2BOX_JOBS=2 DMA2BOX_LOW_MEMORY=1 ./build.sh
 NA_OPTS=()
-if [ -n "${DMA2RAY_JOBS:-}" ]; then
-    NA_OPTS+=(--jobs="$DMA2RAY_JOBS")
+if [ -n "${DMA2BOX_JOBS:-}" ]; then
+    NA_OPTS+=(--jobs="$DMA2BOX_JOBS")
 fi
-if [ "${DMA2RAY_LOW_MEMORY:-0}" = "1" ]; then
+if [ "${DMA2BOX_LOW_MEMORY:-0}" = "1" ]; then
     NA_OPTS+=(--low-memory)
 fi
 
@@ -84,7 +84,7 @@ cat > "$ROOT/.build/entry.py" <<'EOF'
 # Точка входа для сборки: run.py удалён, приложение компилируется в бинарник.
 import sys
 
-from dma2ray.app import main
+from dma2box.app import main
 
 raise SystemExit(main())
 EOF
@@ -94,23 +94,23 @@ rm -rf "$ROOT/dist"
 "$PY" -m nuitka \
     --standalone \
     --output-dir="$ROOT/dist" \
-    --output-filename=dma2ray \
+    --output-filename=dma2box \
     --include-package=gi \
     --assume-yes-for-downloads \
     ${NA_OPTS[@]+"${NA_OPTS[@]}"} \
     "$ROOT/.build/entry.py"
-mv "$ROOT/dist/entry.dist" "$ROOT/dist/dma2ray.dist"
+mv "$ROOT/dist/entry.dist" "$ROOT/dist/dma2box.dist"
 
 echo "4/4: helper-скрипты и данные рядом с бинарником..."
 # __file__ скомпилированных модулей указывает внутрь dist-каталога,
 # поэтому privileged.py/tray_helper.py и data/ кладутся туда же.
-mkdir -p "$ROOT/dist/dma2ray.dist/helpers"
-cp -a "$ROOT/dma2ray/privileged.py" "$ROOT/dma2ray/tray_helper.py" \
-      "$ROOT/dist/dma2ray.dist/helpers/"
-cp -a "$ROOT/data" "$ROOT/dist/dma2ray.dist/"
-cp -a "$ROOT/LICENSE" "$ROOT/README.md" "$ROOT/dist/dma2ray.dist/" 2>/dev/null || true
+mkdir -p "$ROOT/dist/dma2box.dist/helpers"
+cp -a "$ROOT/dma2box/privileged.py" "$ROOT/dma2box/tray_helper.py" \
+      "$ROOT/dist/dma2box.dist/helpers/"
+cp -a "$ROOT/data" "$ROOT/dist/dma2box.dist/"
+cp -a "$ROOT/LICENSE" "$ROOT/README.md" "$ROOT/dist/dma2box.dist/" 2>/dev/null || true
 
 echo
-echo "Готово: dist/dma2ray.dist/dma2ray"
-ls -lh "$ROOT/dist/dma2ray.dist/dma2ray"
-"$ROOT/dist/dma2ray.dist/dma2ray" --version
+echo "Готово: dist/dma2box.dist/dma2box"
+ls -lh "$ROOT/dist/dma2box.dist/dma2box"
+"$ROOT/dist/dma2box.dist/dma2box" --version

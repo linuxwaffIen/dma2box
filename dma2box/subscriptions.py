@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 
 MAX_SUBSCRIPTION_BYTES = 5 * 1024 * 1024
-USER_AGENT = "dma2ray/0.2"
+USER_AGENT = "dma2box/0.2"
 SUPPORTED_PREFIXES = (
     "vless://",
     "trojan://",

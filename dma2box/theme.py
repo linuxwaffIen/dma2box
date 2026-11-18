@@ -1,4 +1,4 @@
-"""Material 3 theme for Dma2ray.
+"""Material 3 theme for Dma2box.
 
 Один активный GtkCssProvider на APPLICATION-приоритете: light / dark / high-contrast.
 Палитры генерируются из seed-цвета, поэтому акцент меняется на лету.
@@ -271,7 +271,7 @@ scrollbar > range > trough > slider {
 scrollbar > range > trough > slider:hover { background-color: alpha(currentColor, 0.44); }
 scrollbar > range > trough > slider:active { background-color: alpha(currentColor, 0.62); }
 
-image.dma2ray-symbolic {
+image.dma2box-symbolic {
     transition: color 260ms cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -501,8 +501,8 @@ toast label, toast button { color: @md_inverse_on_surface; }
     background-color: @md_surface_container_highest;
     color: @md_on_surface_variant;
 }
-image.dma2ray-accent-icon,
-button.dma2ray-accent-icon {
+image.dma2box-accent-icon,
+button.dma2box-accent-icon {
     color: @accent_color;
     transition: color 260ms cubic-bezier(0.2, 0, 0, 1);
 }

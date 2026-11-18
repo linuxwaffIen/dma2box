@@ -9,7 +9,7 @@ import ast
 import unittest
 from pathlib import Path
 
-WINDOW = Path(__file__).resolve().parent.parent / "dma2ray" / "window.py"
+WINDOW = Path(__file__).resolve().parent.parent / "dma2box" / "window.py"
 
 
 class WindowSignalSignatureTests(unittest.TestCase):

@@ -5,7 +5,7 @@ import socket
 import threading
 import unittest
 
-from dma2ray.tray import TrayController
+from dma2box.tray import TrayController
 
 
 class TrayProtocolTests(unittest.TestCase):

@@ -8,10 +8,10 @@ from pathlib import Path
 
 from .icons import APP_ICON_SVG, ICONS, TRAY_ICONS
 
-APP_ID = "io.github.dma2ray.Dma2ray"
-APP_NAME = "dma2ray"
-APP_TITLE = "Dma2ray"
-VERSION = "0.2.1"
+APP_ID = "io.github.dma2box.Dma2box"
+APP_NAME = "dma2box"
+APP_TITLE = "Dma2box"
+VERSION = "0.3.0"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -55,30 +55,25 @@ def core_arch_dir(arch: str | None = None) -> Path:
     return CORE_BIN_DIR / (arch or current_arch())
 
 
-def core_dir(kernel_type: str = "xray", arch: str | None = None) -> Path:
-    """Каталог ядра: bin/<arch>/xray или bin/<arch>/amnezia."""
-    kind = "amnezia" if kernel_type.startswith("amnezia") else "xray"
-    return core_arch_dir(arch) / kind
+def core_dir(arch: str | None = None) -> Path:
+    """Каталог ядра: bin/<arch>/sing-box."""
+    return core_arch_dir(arch) / "sing-box"
 
 
-CORE_PATH = core_dir("xray") / "xray"
+def core_path(arch: str | None = None) -> Path:
+    return core_dir(arch) / "sing-box"
 
 
-def core_path(kernel_type: str = "xray", arch: str | None = None) -> Path:
-    if kernel_type == "xray" and arch is None:
-        return CORE_PATH
-    return core_dir(kernel_type, arch) / "xray"
+CORE_PATH = core_path()
 
-LOG_FILE = CACHE_DIR / "xray.log"
+LOG_FILE = CACHE_DIR / "sing-box.log"
 CONFIG_FILE = CACHE_DIR / "config.json"
-HY_PATH = CORE_BIN_DIR / "hysteria"
-HY_CONFIG_FILE = CACHE_DIR / "config-hy.yaml"
 # The privileged helper owns this root-managed socket directory. Keeping the
 # socket out of the user's writable XDG runtime tree prevents path replacement
 # races against a process running as root.
-PRIV_SOCKET = Path("/run/dma2ray") / f"privileged-{os.getuid()}.sock"
+PRIV_SOCKET = Path("/run/dma2box") / f"privileged-{os.getuid()}.sock"
 TRAY_SOCKET = RUNTIME_DIR / "tray.sock"
-ICON_NAME = "io.github.dma2ray.Dma2ray"
+ICON_NAME = "io.github.dma2box.Dma2box"
 
 _INSTALL_ROOTS = (
     Path("/usr/lib") / APP_NAME,
@@ -96,12 +91,12 @@ def _locate(*candidates: Path) -> Path:
 PRIV_SCRIPT = _locate(
     Path(__file__).resolve().parent / "privileged.py",
     PROJECT_ROOT / "helpers" / "privileged.py",
-    *(_root / "dma2ray" / "privileged.py" for _root in _INSTALL_ROOTS),
+    *(_root / "dma2box" / "privileged.py" for _root in _INSTALL_ROOTS),
 )
 TRAY_SCRIPT = _locate(
     Path(__file__).resolve().parent / "tray_helper.py",
     PROJECT_ROOT / "helpers" / "tray_helper.py",
-    *(_root / "dma2ray" / "tray_helper.py" for _root in _INSTALL_ROOTS),
+    *(_root / "dma2box" / "tray_helper.py" for _root in _INSTALL_ROOTS),
 )
 ICON_FILE = _locate(
     PROJECT_ROOT / "data" / f"{ICON_NAME}.svg",
@@ -136,81 +131,59 @@ def app_icon_path() -> Path:
 
 def tray_icon_path(state: str) -> Path:
     ensure_icons()
-    return icons_dir() / f"dma2ray-tray-{state}.svg"
+    return icons_dir() / f"dma2box-tray-{state}.svg"
 
-_LEGACY_NAME = "vless-gtk"
+LEGACY_NAMES = ("vless-gtk", "dma2ray")
 
 
 def _migrate_legacy() -> None:
-    for old, new in (
-        (_xdg("XDG_CONFIG_HOME", ".config") / _LEGACY_NAME, CONFIG_DIR),
-        (_xdg("XDG_DATA_HOME", ".local/share") / _LEGACY_NAME, DATA_DIR),
-        (_xdg("XDG_STATE_HOME", ".local/state") / _LEGACY_NAME, STATE_DIR),
-        (_xdg("XDG_CACHE_HOME", ".cache") / _LEGACY_NAME, CACHE_DIR),
-    ):
-        if not old.is_dir() or new.exists():
-            continue
-        try:
-            new.parent.mkdir(parents=True, exist_ok=True)
-            old.rename(new)
-        except OSError:
-            pass
-    old_auto = _xdg("XDG_CONFIG_HOME", ".config") / "autostart" / f"{_LEGACY_NAME}.desktop"
-    new_auto = _xdg("XDG_CONFIG_HOME", ".config") / "autostart" / f"{APP_NAME}.desktop"
-    if old_auto.is_file() and not new_auto.exists():
-        try:
-            old_auto.rename(new_auto)
-            from . import autostart
+    """Переносим настройки со старых имён приложения, чтобы ничего не потерять."""
+    for legacy in LEGACY_NAMES:
+        for old, new in (
+            (_xdg("XDG_CONFIG_HOME", ".config") / legacy, CONFIG_DIR),
+            (_xdg("XDG_DATA_HOME", ".local/share") / legacy, DATA_DIR),
+            (_xdg("XDG_STATE_HOME", ".local/state") / legacy, STATE_DIR),
+            (_xdg("XDG_CACHE_HOME", ".cache") / legacy, CACHE_DIR),
+        ):
+            if not old.is_dir() or new.exists():
+                continue
+            try:
+                new.parent.mkdir(parents=True, exist_ok=True)
+                old.rename(new)
+            except OSError:
+                pass
+        old_auto = _xdg("XDG_CONFIG_HOME", ".config") / "autostart" / f"{legacy}.desktop"
+        new_auto = _xdg("XDG_CONFIG_HOME", ".config") / "autostart" / f"{APP_NAME}.desktop"
+        if old_auto.is_file() and not new_auto.exists():
+            try:
+                text = old_auto.read_text("utf-8")
+                enabled = (
+                    "X-GNOME-Autostart-enabled=true" in text
+                    and "Hidden=true" not in text
+                )
+                from . import autostart
 
-            if "X-GNOME-Autostart-enabled=true" in new_auto.read_text("utf-8"):
-                new_auto.write_text(autostart.desktop_entry(), "utf-8")
-        except OSError:
-            pass
+                entry = autostart.desktop_entry()
+                if not enabled:
+                    entry = entry.replace(
+                        "X-GNOME-Autostart-enabled=true",
+                        "X-GNOME-Autostart-enabled=false",
+                    )
+                new_auto.write_text(entry, "utf-8")
+                old_auto.unlink()
+            except OSError:
+                pass
 
 
 def _migrate_core_layout() -> None:
-    """Старые bin/xray, bin/amnezia → bin/<arch>/xray, bin/<arch>/amnezia."""
-    target_xray = core_dir("xray")
-    target_amnezia = core_dir("amnezia-xray")
-
-    legacy = CORE_BIN_DIR / "xray"
-    if legacy.is_file():
-        temporary = CORE_BIN_DIR / ".xray-legacy"
+    """Ранние сборки клали бинарник прямо в bin/<arch>/sing-box."""
+    legacy = core_arch_dir() / "sing-box"
+    if legacy.is_file() and not CORE_PATH.exists():
         try:
-            legacy.replace(temporary)
-            target_xray.mkdir(parents=True, exist_ok=True)
-            temporary.replace(target_xray / "xray")
+            core_dir().mkdir(parents=True, exist_ok=True)
+            legacy.replace(CORE_PATH)
         except OSError:
             pass
-    elif legacy.is_dir():
-        try:
-            if target_xray.exists():
-                for item in legacy.iterdir():
-                    destination = target_xray / item.name
-                    if not destination.exists():
-                        item.replace(destination)
-            else:
-                target_xray.parent.mkdir(parents=True, exist_ok=True)
-                legacy.replace(target_xray)
-        except OSError:
-            pass
-
-    legacy_amnezia = CORE_BIN_DIR / "amnezia"
-    if legacy_amnezia.is_dir() and not target_amnezia.exists():
-        try:
-            target_amnezia.parent.mkdir(parents=True, exist_ok=True)
-            legacy_amnezia.replace(target_amnezia)
-        except OSError:
-            pass
-
-    for name in ("geoip.dat", "geosite.dat", "LICENSE", "README.md"):
-        source = CORE_BIN_DIR / name
-        if source.is_file():
-            try:
-                target_xray.mkdir(parents=True, exist_ok=True)
-                source.replace(target_xray / name)
-            except OSError:
-                pass
 
 
 def ensure_dirs() -> None:
@@ -224,8 +197,7 @@ def ensure_dirs() -> None:
         (RUNTIME_DIR, 0o700),
         (CORE_BIN_DIR, 0o755),
         (core_arch_dir(), 0o755),
-        (core_dir("xray"), 0o755),
-        (core_dir("amnezia-xray"), 0o755),
+        (core_dir(), 0o755),
     ):
         directory.mkdir(parents=True, exist_ok=True)
         try:
@@ -246,7 +218,7 @@ def install_user_icon() -> Path:
         status_dir.mkdir(parents=True, exist_ok=True)
         for state in ("stopped", "starting", "running"):
             src = tray_icon_path(state)
-            dst = status_dir / f"dma2ray-tray-{state}.svg"
+            dst = status_dir / f"dma2box-tray-{state}.svg"
             if src.exists() and (not dst.exists() or dst.read_bytes() != src.read_bytes()):
                 dst.write_bytes(src.read_bytes())
     except OSError:

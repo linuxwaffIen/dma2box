@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from dma2ray.ping import (
+from dma2box.ping import (
     PING_TYPE_LABELS,
     PING_TYPES,
     http_ping,
@@ -64,9 +64,9 @@ class TestPing(unittest.TestCase):
     def test_http_ping_failure(self, _):
         self.assertIsNone(http_ping("example.com", 80, use_tls=False, timeout=1.0))
 
-    @patch("dma2ray.ping.tcp_ping", return_value=42)
-    @patch("dma2ray.ping.http_ping", return_value=120)
-    @patch("dma2ray.ping.icmp_ping", return_value=15)
+    @patch("dma2box.ping.tcp_ping", return_value=42)
+    @patch("dma2box.ping.http_ping", return_value=120)
+    @patch("dma2box.ping.icmp_ping", return_value=15)
     def test_ping_endpoint_dispatch(self, mock_icmp, mock_http, mock_tcp):
         self.assertEqual(ping_endpoint("host", 80, "tcp"), 42)
         mock_tcp.assert_called_once_with("host", 80, timeout=4.0)
