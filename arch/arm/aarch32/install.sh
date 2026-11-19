@@ -165,9 +165,32 @@ install_app() {
     local bin_src="$ROOT/dist/dma2box.dist/dma2box"
     if [[ ! -x "$bin_src" ]]; then
         echo "Ошибка: бинарник не собран." >&2
-        echo "Скомпилируйте исходники: ./build.sh" >&2
-        echo "  (результат: dist/dma2box.dist/dma2box)" >&2
-        exit 1
+        local answer=""
+        # Предлагаем сборку только при интерактивном запуске; если stdin
+        # не терминал (CI, пайп), ведём себя как раньше — exit 1.
+        if [[ -t 0 ]]; then
+            read -r -p "Собрать сейчас через ./build.sh? [y/N] " answer || answer=""
+        fi
+        case "$answer" in
+            [Yy]|[Yy][Ee][Ss])
+                # $ROOT/build.sh — тот же скрипт, что ./build.sh в корне
+                # (враппер делегирует в arch/<цель>/build.sh).
+                echo "Сборка займёт 1-3 минуты..."
+                "$ROOT/build.sh" || {
+                    echo "Ошибка: сборка не удалась. Запустите вручную: ./build.sh" >&2
+                    exit 1
+                }
+                if [[ ! -x "$bin_src" ]]; then
+                    echo "Ошибка: после сборки бинарник не найден: $bin_src" >&2
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "Скомпилируйте исходники: ./build.sh" >&2
+                echo "  (результат: dist/dma2box.dist/dma2box)" >&2
+                exit 1
+                ;;
+        esac
     fi
     for source in "$bin_src" "$ROOT/dma2box" "$ROOT/data/$APP_ID.desktop" "$ROOT/data/$APP_ID.svg"; do
         [[ -e "$source" ]] || { echo "Не найден файл: $source" >&2; exit 1; }
