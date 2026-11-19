@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Dma2box
+Comment=VLESS client with sing-box TUN support
+Exec=dma2box
+Icon=io.github.dma2box.Dma2box
+Terminal=false
+Categories=Network;
+Keywords=VLESS;sing-box;VPN;Proxy;
+MimeType=x-scheme-handler/vless;
+StartupNotify=true
