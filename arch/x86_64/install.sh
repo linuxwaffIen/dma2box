@@ -197,7 +197,7 @@ install_app() {
     done
 
     install -d "$APP_DIR" "$PREFIX/bin" "$DESKTOP_DIR" "$ICON_DIR"
-    rm -rf "$APP_DIR/dma2box" "$APP_DIR/data" "$APP_DIR/app" "$APP_DIR/bin"
+    rm -rf "${APP_DIR:?}/dma2box" "${APP_DIR:?}/data" "${APP_DIR:?}/app" "${APP_DIR:?}/bin"
     cp -a "$ROOT/dma2box" "$APP_DIR/"
     cp -a "$ROOT/data" "$APP_DIR/"
     # Скомпилированный бинарник с библиотеками, helper-скриптами и данными.

@@ -43,7 +43,7 @@ else
     fi
     if ! "$VENV/bin/python" -c "import nuitka" >/dev/null 2>&1; then
         echo "Ошибка: не удалось установить nuitka (нужен интернет," >&2
-        "либо установите его: pip install nuitka)" >&2
+        echo "либо установите его: pip install nuitka)" >&2
         exit 1
     fi
     PY="$VENV/bin/python"

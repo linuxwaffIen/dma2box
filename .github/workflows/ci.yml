@@ -42,8 +42,18 @@ jobs:
 
       - name: Проверка компиляции исходников
         run: |
-          python3 -m compileall -q dma2ray tests
+          python3 -m compileall -q dma2box tests
+        working-directory: arch/x86_64
 
       - name: Запуск unit-тестов
         run: |
           python3 -m unittest discover -s tests -p "test_*.py"
+        working-directory: arch/x86_64
+
+      - name: ShellCheck install.sh
+        run: |
+          shellcheck \
+            install.sh build.sh \
+            arch/x86/install.sh arch/x86_64/install.sh \
+            arch/arm/aarch32/install.sh arch/arm/aarch64/install.sh \
+            arch/arm/armv7/install.sh
