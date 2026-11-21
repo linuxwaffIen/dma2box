@@ -107,6 +107,11 @@ echo "4/4: helper-скрипты и данные рядом с бинарник�
 mkdir -p "$ROOT/dist/dma2box.dist/helpers"
 cp -a "$ROOT/dma2box/privileged.py" "$ROOT/dma2box/tray_helper.py" \
       "$ROOT/dist/dma2box.dist/helpers/"
+# priv_setup.py — авто-подготовка TUN из приложения; есть не во всех
+# архитектурных снимках, поэтому копируем только при наличии.
+if [ -f "$ROOT/dma2box/priv_setup.py" ]; then
+    cp -a "$ROOT/dma2box/priv_setup.py" "$ROOT/dist/dma2box.dist/helpers/"
+fi
 cp -a "$ROOT/data" "$ROOT/dist/dma2box.dist/"
 cp -a "$ROOT/LICENSE" "$ROOT/README.md" "$ROOT/dist/dma2box.dist/" 2>/dev/null || true
 

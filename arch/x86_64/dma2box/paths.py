@@ -6,7 +6,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from .icons import APP_ICON_SVG, ICONS, TRAY_ICONS
+from .icons import ICONS
 
 APP_ID = "io.github.dma2box.Dma2box"
 APP_NAME = "dma2box"
@@ -94,6 +94,11 @@ PRIV_SCRIPT = _locate(
     Path(__file__).resolve().parent / "privileged.py",
     PROJECT_ROOT / "helpers" / "privileged.py",
     *(_root / "dma2box" / "privileged.py" for _root in _INSTALL_ROOTS),
+)
+PRIV_SETUP_SCRIPT = _locate(
+    Path(__file__).resolve().parent / "priv_setup.py",
+    PROJECT_ROOT / "helpers" / "priv_setup.py",
+    *(_root / "dma2box" / "priv_setup.py" for _root in _INSTALL_ROOTS),
 )
 TRAY_SCRIPT = _locate(
     Path(__file__).resolve().parent / "tray_helper.py",

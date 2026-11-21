@@ -11,7 +11,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 from pathlib import Path
 
 from .accent_ui import AccentMixin, themed_button
-from . import autostart, dmacore, health, paths, sysproxy
+from . import autostart, dmacore, health, paths, sysproxy, tun_setup
 from .core import CoreManager, CoreStatus, find_core
 from .flags import flag_for
 from .installer import SUPPORTED_ARCHS, current_arch, install_core
@@ -1385,6 +1385,98 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             return None
         return result["password"]
 
+    # ------------------------------------------------------- TUN из коробки
+    # Приложение само готовит окружение TUN: докачивает ядро sing-box и через
+    # pkexec ставит root-компоненты. Пользователь видит только пароль-диалог.
+    def _offer_tun_bootstrap(self, profile: Profile | None, *, connect: bool) -> None:
+        """Диалог авто-подготовки TUN: скачать ядро и/или поставить root-компоненты."""
+        if getattr(self, "_tun_preparing", False):
+            self._toast("Компоненты TUN уже готовятся…")
+            return
+        checks = tun_setup.readiness(self.store)
+        failed = [check for check in checks if not check.ok]
+        fixable = [check for check in failed if check.fix]
+        if not fixable:
+            # Чинится только руками (polkit/pkexec, /dev/net/tun) — не водим
+            # пользователя по кругу «Подготовить».
+            body = "\n".join(f"• {check.title}" for check in failed)
+            dialog = Adw.MessageDialog(
+                transient_for=self,
+                modal=True,
+                heading="TUN недоступен",
+                body=body + "\n\nУстановите недостающие пакеты и попробуйте снова.",
+            )
+            dialog.add_response("ok", "Понятно")
+            dialog.set_default_response("ok")
+            dialog.set_close_response("ok")
+            dialog.present()
+            return
+        body = "\n".join(f"• {check.title}" for check in failed)
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            modal=True,
+            heading="Подготовка TUN-режима",
+            body=(
+                f"Не хватает:\n{body}\n\n"
+                "Приложение скачает ядро sing-box и установит системный "
+                "компонент (polkit + root-ядро). Понадобится пароль администратора."
+            ),
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("setup", "Подготовить")
+        dialog.set_response_appearance("setup", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("setup")
+        dialog.set_close_response("cancel")
+
+        def on_response(_dialog: Adw.MessageDialog, response: str) -> None:
+            if response == "setup":
+                self._tun_bootstrap(profile, connect=connect)
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def _tun_bootstrap(self, profile: Profile | None, *, connect: bool) -> None:
+        """Фоновая подготовка TUN; статус — тостами, пароль — GUI-диалогом."""
+        self._tun_preparing = True
+
+        def on_status(text: str) -> None:
+            GLib.idle_add(self._toast, text)
+
+        def worker() -> None:
+            try:
+                remaining = tun_setup.ensure_ready(
+                    self.store, self._ask_password_dialog, on_status
+                )
+            except Exception as exc:
+                GLib.idle_add(self._tun_bootstrap_done, profile, connect, str(exc))
+                return
+            left = tun_setup.problems(remaining)
+            GLib.idle_add(self._tun_bootstrap_done, profile, connect, left)
+
+        threading.Thread(target=worker, name="tun-bootstrap", daemon=True).start()
+
+    def _tun_bootstrap_done(
+        self, profile: Profile | None, connect: bool, problem: str
+    ) -> bool:
+        self._tun_preparing = False
+        if problem:
+            dialog = Adw.MessageDialog(
+                transient_for=self,
+                modal=True,
+                heading="TUN не подготовлен",
+                body=problem,
+            )
+            dialog.add_response("ok", "Закрыть")
+            dialog.set_default_response("ok")
+            dialog.set_close_response("ok")
+            dialog.present()
+            return False
+        self._toast("Компоненты TUN готовы")
+        if connect and profile is not None:
+            # Подготовка успешна — повторяем запуск, readiness уже зелёный.
+            self._start_selected()
+        return False
+
     def _core_status_from_thread(self, status: CoreStatus) -> None:
         GLib.idle_add(self._apply_core_status, status)
 
@@ -1587,6 +1679,11 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             return
         tun = self.store.mode in ("vpn", "router")
         self._reset_health()
+        if tun and tun_setup.needs_setup(self.store):
+            # «Из коробки»: недостающие компоненты ставим до запуска ядра,
+            # иначе CoreManager упадёт с подсказкой про sudo install.sh.
+            self._offer_tun_bootstrap(profile, connect=True)
+            return
         self._core.start(profile, tun)
 
     def _select_profile(self, profile_id: str) -> None:
@@ -2174,6 +2271,10 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         if self._core.is_running:
             message += " Переподключитесь, чтобы применить."
         self._toast(message)
+        if mode in ("vpn", "router") and tun_setup.needs_setup(self.store):
+            # Предлагаем подготовку сразу при выборе режима, а не в момент
+            # первого подключения.
+            self._offer_tun_bootstrap(None, connect=False)
 
     def _settings_sort(self, row: Adw.SwitchRow) -> None:
         self.store.set_setting("sort_by_latency", bool(row.get_active()))
