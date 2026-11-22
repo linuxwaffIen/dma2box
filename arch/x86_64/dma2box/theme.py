@@ -258,6 +258,15 @@ entry { border-radius: 10px; }
 dialog, dialog-host > dialog { border-radius: 24px; }
 dialog.bottom-sheet, dialog-host > dialog.bottom-sheet { border-radius: 24px 24px 0 0; }
 popover > contents { border-radius: 14px; }
+popover.menu > contents > modelbutton {
+    margin: 2px 6px;
+    padding: 7px 10px;
+    border-radius: 10px;
+}
+popover.menu > contents > modelbutton:hover {
+    border-radius: 10px;
+    background-color: alpha(@window_fg_color, 0.08);
+}
 tooltip { border-radius: 8px; }
 toast { border-radius: 16px; }
 
@@ -570,6 +579,12 @@ window {
     font-weight: 800;
     letter-spacing: -0.3px;
 }
+.home-hero {
+    padding: 24px 20px;
+    border-radius: 24px;
+    background-color: alpha(@card_bg_color, 0.74);
+    border: 1px solid alpha(@window_fg_color, 0.08);
+}
 .server-card {
     padding: 14px 16px;
     border-left: 3px solid @accent_color;
@@ -606,17 +621,50 @@ scrollbar slider {
     min-height: 40px;
     padding: 4px 10px;
     font-weight: 600;
+    border-radius: 10px;
 }
 .right-menu .nav-tab:hover {
     background-color: alpha(@window_fg_color, 0.08);
+    border-radius: 10px;
 }
 .right-menu .nav-tab-selected {
     background-color: alpha(@accent_color, 0.18);
     color: @accent_color;
+    border-radius: 10px;
 }
 .nav-indicator {
     border-radius: 0;
     min-height: 2px;
+}
+
+/* Phone layout: the navigation becomes a compact bottom bar. */
+.mobile-layout .main-headerbar { padding: 2px 4px; }
+.mobile-layout .right-menu {
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid alpha(@window_fg_color, 0.12);
+    padding: 2px 8px;
+}
+.mobile-layout .right-menu .nav-tab {
+    min-width: 0;
+    min-height: 64px;
+    margin: 0 3px;
+    padding: 4px 6px;
+    border-radius: 12px;
+    font-size: 0.82em;
+}
+.mobile-layout .right-menu .nav-tab-selected {
+    background-color: alpha(@accent_color, 0.16);
+    color: @accent_color;
+}
+.mobile-layout .connect-big {
+    min-width: 112px;
+    min-height: 112px;
+}
+.mobile-layout .home-status { font-size: 1.25em; }
+.mobile-layout .home-hero {
+    padding: 18px 14px;
+    border-radius: 22px;
 }
 """
 

@@ -170,6 +170,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self._install_css()
         self._build_actions()
         self._build_ui()
+        self._responsive_timer = GLib.timeout_add(300, self._poll_responsive_layout)
         GLib.timeout_add_seconds(3, self._health_tick)
         self._refresh_accent_selection()
         if str(self.store.settings.get("accent_mode", "preset")) == "wallpaper":
@@ -244,6 +245,9 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         if self._closing:
             return
         self._closing = True
+        if self._responsive_timer is not None:
+            GLib.source_remove(self._responsive_timer)
+            self._responsive_timer = None
         theme = getattr(self, "_theme", None)
         if theme is not None:
             theme.dispose()
@@ -387,8 +391,58 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         shell.append(self.view_stack)
         shell.append(self.right_revealer)
         toolbar.set_content(shell)
+        self.shell = shell
         self.toast_overlay.set_child(toolbar)
         self.set_content(self.toast_overlay)
+        self._update_responsive_layout()
+
+    def _update_responsive_layout(self, *_args) -> None:
+        """Use a bottom navigation bar on narrow phone sized windows."""
+        if not hasattr(self, "right_revealer"):
+            return
+        compact = self.get_width() < 680
+        if getattr(self, "_compact_layout", None) is compact:
+            return
+        self._compact_layout = compact
+        if compact:
+            self.add_css_class("mobile-layout")
+        else:
+            self.remove_css_class("mobile-layout")
+        self.shell.set_orientation(
+            Gtk.Orientation.VERTICAL if compact else Gtk.Orientation.HORIZONTAL
+        )
+        self.right_revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_UP
+            if compact else Gtk.RevealerTransitionType.SLIDE_LEFT
+        )
+        self.right_revealer.set_reveal_child(
+            True if compact else self.panel_toggle.get_active()
+        )
+        self.right_revealer.set_size_request(-1, 68 if compact else -1)
+        self.panel_toggle.set_visible(not compact)
+        self.switcher_bar.set_orientation(
+            Gtk.Orientation.HORIZONTAL if compact else Gtk.Orientation.VERTICAL
+        )
+        if compact:
+            self.switcher_bar.set_size_request(-1, 68)
+        else:
+            self.switcher_bar.set_size_request(132, -1)
+        self._nav_buttons_box.set_orientation(
+            Gtk.Orientation.HORIZONTAL if compact else Gtk.Orientation.VERTICAL
+        )
+        for item, label in zip(self._nav_item_boxes, self._nav_labels):
+            item.set_orientation(
+                Gtk.Orientation.VERTICAL if compact else Gtk.Orientation.HORIZONTAL
+            )
+            item.set_spacing(4 if compact else 10)
+            label.set_xalign(0.5 if compact else 0.0)
+        self._nav_indicator.set_visible(not compact)
+
+    def _poll_responsive_layout(self) -> bool:
+        if self._closing:
+            return False
+        self._update_responsive_layout()
+        return True
 
     def _build_right_menu(self) -> Gtk.Widget:
         """Прямоугольная панель меню справа: страницы и быстрые действия."""
@@ -404,24 +458,34 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         nav.set_margin_top(4)
         nav.add_css_class("nav-buttons")
         self._nav_buttons = []
-        for name, title in (
-            ("home", "Главная"),
-            ("servers", "Серверы"),
-            ("settings", "Настройки"),
+        self._nav_item_boxes = []
+        self._nav_labels = []
+        for name, title, icon_name in (
+            ("home", "Главная", "go-home-symbolic"),
+            ("servers", "Серверы", "network-server-symbolic"),
+            ("settings", "Настройки", "emblem-system-symbolic"),
         ):
-            button = Gtk.Button(label=title)
+            button = Gtk.Button()
             button.set_hexpand(True)
             button.add_css_class("flat")
             button.add_css_class("nav-tab")
-            child = button.get_child()
-            if isinstance(child, Gtk.Label):
-                child.set_xalign(0.0)
+            item = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            icon = Gtk.Image.new_from_icon_name(
+                _pick_icon(self._icon_theme(), icon_name, "applications-system-symbolic")
+            )
+            icon.set_pixel_size(18)
+            label = Gtk.Label(label=title, xalign=0.0)
+            item.append(icon)
+            item.append(label)
+            button.set_child(item)
             button.connect(
                 "clicked",
                 lambda _button, page=name: self.view_stack.set_visible_child_name(page),
             )
             nav.append(button)
             self._nav_buttons.append(button)
+            self._nav_item_boxes.append(item)
+            self._nav_labels.append(label)
         self._nav_buttons_box = nav
 
         self._nav_indicator = Gtk.Box()
@@ -500,19 +564,16 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self.home_status = Gtk.Label(label="Отключено")
         self.home_status.add_css_class("home-status")
         self.home_status.set_halign(Gtk.Align.CENTER)
-        box.append(self.home_status)
         self.home_detail = Gtk.Label(label="Выберите профиль")
         self.home_detail.add_css_class("section-hint")
         self.home_detail.set_halign(Gtk.Align.CENTER)
         self.home_detail.set_wrap(True)
         self.home_detail.set_max_width_chars(44)
-        box.append(self.home_detail)
         self.health_label = Gtk.Label(label="")
         self.health_label.add_css_class("health-line")
         self.health_label.set_halign(Gtk.Align.CENTER)
         self.health_label.set_wrap(True)
         self.health_label.set_max_width_chars(48)
-        box.append(self.health_label)
         theme = self._icon_theme()
         self.big_icon = Gtk.Image.new_from_icon_name(
             _pick_icon(theme, "dma2box-shield-symbolic", "network-vpn-symbolic", "security-high-symbolic")
@@ -526,7 +587,13 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self.big_button.set_halign(Gtk.Align.CENTER)
         self.big_button.set_tooltip_text("Подключить или отключить")
         self.big_button.connect("clicked", lambda *_: self._toggle_connection())
-        box.append(self.big_button)
+        hero = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        hero.add_css_class("home-hero")
+        hero.append(self.home_status)
+        hero.append(self.home_detail)
+        hero.append(self.health_label)
+        hero.append(self.big_button)
+        box.append(hero)
         self.server_card.add_css_class("flat")
         self.server_card.add_css_class("server-card")
         self.server_card.set_halign(Gtk.Align.FILL)

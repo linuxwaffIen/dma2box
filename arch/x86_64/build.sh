@@ -12,6 +12,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# Keep inherited toolchain settings from silently changing the target ABI.
+# The desktop environment used for builds can export clang + ld.lld configured
+# for i386 while Python and Nuitka objects are x86-64. GCC is the supported
+# default; callers can opt into another native toolchain explicitly.
+export CC="${DMA2BOX_CC:-gcc}"
+export CXX="${DMA2BOX_CXX:-g++}"
+export LD="${DMA2BOX_LD:-ld}"
+
 VENV="$ROOT/.build/venv"
 
 ensure_venv() {
