@@ -52,8 +52,13 @@ jobs:
 
       - name: ShellCheck install.sh
         run: |
-          shellcheck \
+          # -S warning: info-уровень (SC1091 на динамический source
+          # arch/detect.sh) — ожидаемый шум врапперов, не повод для красного CI.
+          shellcheck -S warning \
             install.sh build.sh \
             arch/x86/install.sh arch/x86_64/install.sh \
             arch/arm/aarch32/install.sh arch/arm/aarch64/install.sh \
-            arch/arm/armv7/install.sh
+            arch/arm/armv7/install.sh \
+            arch/x86/build.sh arch/x86_64/build.sh \
+            arch/arm/aarch32/build.sh arch/arm/aarch64/build.sh \
+            arch/arm/armv7/build.sh
