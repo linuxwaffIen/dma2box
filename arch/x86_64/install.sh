@@ -113,6 +113,9 @@ as_target_user() {
 }
 
 APP_DIR="$PREFIX/lib/$APP_NAME"
+# Root-компоненты TUN: ставятся системой (priv_setup) и чистятся
+# только при --uninstall --system (без затрагивания пользовательских данных).
+APP_LIBEXEC="/usr/libexec/$APP_NAME"
 BIN="$PREFIX/bin/$APP_NAME"
 DESKTOP_DIR="$PREFIX/share/applications"
 ICON_DIR="$PREFIX/share/icons/hicolor/scalable/apps"
@@ -141,8 +144,15 @@ register_scheme() {
 }
 
 uninstall() {
-    rm -f "$BIN" "$DESKTOP" "$ICON"
-    rm -rf "$APP_DIR"
+    rm -f "${BIN:?}" "${DESKTOP:?}" "${ICON:?}"
+    rm -rf "${APP_DIR:?}"
+    if [[ "$MODE" == "system" ]]; then
+        # Root-компоненты TUN (helper, root-ядро, polkit-политика):
+        # раньше оставались в системе навсегда после --uninstall --system.
+        rm -f /usr/share/polkit-1/actions/org.dma2box.run-core.policy
+        rm -rf "${APP_LIBEXEC:?}"
+        echo "Удалены системный TUN-компонент (${APP_LIBEXEC}) и polkit-политика."
+    fi
     update_caches
     echo "Удалено: $APP_DIR, $BIN"
     if [[ $PURGE -eq 1 ]]; then
