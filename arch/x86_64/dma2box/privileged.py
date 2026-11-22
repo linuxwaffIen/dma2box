@@ -11,14 +11,16 @@ auto_redirect), поэтому helper не трогает ip rule, таблиц�
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ctypes
 import ipaddress
 import json
-import re
 import os
 import pwd
-import signal
+import re
+import shlex
 import shutil
+import signal
 import socket
 import stat
 import struct
@@ -30,6 +32,30 @@ import time
 from pathlib import Path
 
 ALLOWED_ROOT_KEYS = {"log", "dns", "inbounds", "outbounds", "route"}
+
+# Метка наших NAT-правил и таблицы nftables: sweep отфильтровывают именно
+# осиротевшие правила прошлых сессий, не трогая чужие.
+ROUTER_COMMENT = "dma2box-router"
+NFT_TABLE = "dma2box_router"
+
+
+def _tun_interface_from_config(path: Path) -> str:
+    """Имя tun-интерфейса из конфига; пустая строка — если его нет или
+    имя небезопасно для sysfs-пути (не даём «выпрыгнуть» из /sys/class/net)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    inbounds = data.get("inbounds")
+    if not isinstance(inbounds, list):
+        return ""
+    for inbound in inbounds:
+        if not isinstance(inbound, dict) or inbound.get("type") != "tun":
+            continue
+        name = inbound.get("interface_name")
+        if isinstance(name, str) and name and "/" not in name and name not in (".", ".."):
+            return name
+    return ""
 
 
 def _log_tail(path: Path, limit: int = 16000) -> str:
@@ -44,11 +70,9 @@ def _log_tail(path: Path, limit: int = 16000) -> str:
 
 
 def _pdeathsig() -> None:  # pragma: no cover - runs in the forked child
-    try:
+    with contextlib.suppress(Exception):
         libc = ctypes.CDLL("libc.so.6", use_errno=True)
         libc.prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
-    except Exception:
-        pass
 
 
 def _under(path: Path, root: Path) -> bool:
@@ -126,10 +150,8 @@ class Runner:
 
     def _cleanup_config(self) -> None:
         if self.staged_config is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self.staged_config.unlink()
-            except OSError:
-                pass
             self.staged_config = None
 
     def status(self) -> dict:
@@ -179,7 +201,10 @@ class Runner:
                     stdout=log_handle,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
-                    preexec_fn=_pdeathsig,
+                    # PLW1509 (fork+threads): в дочернем процессе до exec
+                    # выполняется только prctl(PDEATHSIG) — ни одной Python-
+                    # блокировки не берётся, deadlock-сценарий правила исключён.
+                    preexec_fn=_pdeathsig,  # noqa: PLW1509
                     env={
                         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                         "HOME": "/root",
@@ -191,14 +216,29 @@ class Runner:
                 self._cleanup_config()
                 return {"ok": False, "error": f"Не удалось запустить sing-box: {exc}"}
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     log_handle.close()
-                except Exception:
-                    pass
 
-            # Даём sing-box время поднять TUN и установить маршруты.
-            time.sleep(1.0)
-            code = self.proc.poll()
+            # TUN обычно поднимается за доли секунды: ждём появления
+            # интерфейса из конфига в sysfs; ранняя смерть процесса
+            # ловится в цикле, а не слепым sleep.
+            interface = _tun_interface_from_config(config)
+            if interface:
+                deadline = time.monotonic() + 8.0
+                code = None
+                while time.monotonic() < deadline:
+                    code = self.proc.poll()
+                    if code is not None:
+                        break
+                    if Path("/sys/class/net", interface).exists():
+                        break
+                    time.sleep(0.1)
+                if code is None:
+                    code = self.proc.poll()
+            else:
+                # Необычный конфиг без tun-интерфейса — прежнее поведение.
+                time.sleep(1.0)
+                code = self.proc.poll()
             if code is not None:
                 tail = _log_tail(self.log_path)
                 self.proc = None
@@ -229,10 +269,8 @@ class Runner:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
         except OSError:
-            try:
+            with contextlib.suppress(OSError):
                 proc.terminate()
-            except OSError:
-                pass
         deadline = time.monotonic() + 8.0
         while time.monotonic() < deadline:
             if proc.poll() is not None:
@@ -242,19 +280,15 @@ class Runner:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except OSError:
-            try:
+            with contextlib.suppress(OSError):
                 proc.kill()
-            except OSError:
-                pass
-        try:
+        with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            pass
         self._cleanup_config()
 
 
 def _run_command(argv: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=15)
+    return subprocess.run(argv, check=False, capture_output=True, text=True, timeout=15)
 
 
 def _router_detect() -> tuple[str, list[str]]:
@@ -279,65 +313,108 @@ def _router_detect() -> tuple[str, list[str]]:
     return wan, subnets
 
 
-def _router_apply(wan: str, subnets: list[str]) -> list[list[str]]:
-    """Включает ip_forward и MASQUERADE. Возвращает команды для отката."""
+def _ipv6_supported() -> bool:
+    return os.path.isdir("/proc/sys/net/ipv6")
+
+
+def _router_sweep() -> None:
+    """Счищает осиротевшие правила прошлых сессий по нашей метке."""
+    iptables = shutil.which("iptables")
+    if iptables:
+        listing = _run_command([iptables, "-t", "nat", "-S", "POSTROUTING"])
+        for line in listing.stdout.splitlines():
+            if not line.startswith("-A ") or ROUTER_COMMENT not in line:
+                continue
+            tokens = shlex.split(line)
+            tokens[0] = "-D"
+            _run_command([iptables, "-t", "nat", *tokens])
+    nft = shutil.which("nft")
+    if nft:
+        _run_command([nft, "delete", "table", "inet", NFT_TABLE])
+
+
+def _router_apply(wan: str, subnets: list[str], on_undo=None) -> list[list[str]]:
+    """Включает ip_forward (v4 + v6) и MASQUERADE.
+
+    Каждая применённая команда сразу регистрируется в on_undo: сбой
+    посреди списка не оставляет уже поставленные правила осиротевшими —
+    вызывающий успеет откатить сделанное до падения.
+    """
     undo: list[list[str]] = []
-    before = _run_command(["sysctl", "-n", "net.ipv4.ip_forward"]).stdout.strip()
+
+    def committed(argv: list[str]) -> None:
+        undo.append(argv)
+        if on_undo is not None:
+            on_undo(argv)
+
+    before = _run_command(["sysctl", "-n", "net.ipv4.ip_forward"]).stdout.strip() or "0"
     _run_command(["sysctl", "-w", "net.ipv4.ip_forward=1"])
-    undo.append(["sysctl", "-w", f"net.ipv4.ip_forward={before}"])
+    committed(["sysctl", "-w", f"net.ipv4.ip_forward={before}"])
+
+    # Без v6-forwarding LAN-клиенты с IPv6 либо ломаются, либо ходят
+    # мимо туннеля (в router-режиме это утечка пути).
+    if _ipv6_supported():
+        before6 = _run_command(
+            ["sysctl", "-n", "net.ipv6.conf.all.forwarding"]
+        ).stdout.strip() or "0"
+        _run_command(["sysctl", "-w", "net.ipv6.conf.all.forwarding=1"])
+        committed(["sysctl", "-w", f"net.ipv6.conf.all.forwarding={before6}"])
 
     iptables = shutil.which("iptables")
     if iptables:
         for subnet in subnets:
             rule = [
                 "-t", "nat", "-A", "POSTROUTING", "-s", subnet, "-o", wan,
-                "-j", "MASQUERADE", "-m", "comment", "--comment", "dma2box-router",
+                "-j", "MASQUERADE", "-m", "comment", "--comment", ROUTER_COMMENT,
             ]
             # -C проверяет то же правило, что и -A
             check = ["-t", "nat", "-C", "POSTROUTING", "-s", subnet, "-o", wan,
-                     "-j", "MASQUERADE", "-m", "comment", "--comment", "dma2box-router"]
+                     "-j", "MASQUERADE", "-m", "comment", "--comment", ROUTER_COMMENT]
             if _run_command([iptables, *check]).returncode == 0:
                 continue
             result = _run_command([iptables, *rule])
             if result.returncode != 0:
                 raise RuntimeError(f"iptables: {result.stderr.strip()[:180]}")
-            undo.append([iptables, "-t", "nat", "-D", "POSTROUTING", "-s", subnet,
-                         "-o", wan, "-j", "MASQUERADE", "-m", "comment",
-                         "--comment", "dma2box-router"])
+            committed([iptables, "-t", "nat", "-D", "POSTROUTING", "-s", subnet,
+                       "-o", wan, "-j", "MASQUERADE", "-m", "comment",
+                       "--comment", ROUTER_COMMENT])
         return undo
 
     nft = shutil.which("nft")
     if not nft:
         raise RuntimeError("ни iptables, ни nft не найдены — NAT недоступен")
-    _run_command([nft, "delete", "table", "inet", "dma2box_router"])
+    _run_command([nft, "delete", "table", "inet", NFT_TABLE])
+    # Таблица удаляется целиком — она покрывает все добавляемые правила.
+    committed([nft, "delete", "table", "inet", NFT_TABLE])
     commands = [
-        [nft, "add", "table", "inet", "dma2box_router"],
-        [nft, "add", "chain", "inet", "dma2box_router", "postrouting",
+        [nft, "add", "table", "inet", NFT_TABLE],
+        [nft, "add", "chain", "inet", NFT_TABLE, "postrouting",
          "{", "type", "nat", "hook", "postrouting", "priority", "100", ";", "}"],
     ]
     for subnet in subnets:
-        commands.append([nft, "add", "rule", "inet", "dma2box_router", "postrouting",
+        commands.append([nft, "add", "rule", "inet", NFT_TABLE, "postrouting",
                          "ip", "saddr", subnet, "oifname", wan, "masquerade"])
     for command in commands:
         result = _run_command(command)
         if result.returncode != 0:
             raise RuntimeError(f"nft: {result.stderr.strip()[:180]}")
-    return [[nft, "delete", "table", "inet", "dma2box_router"], *undo]
+    return undo
 
 
 def _router_undo(commands: list[list[str]]) -> None:
     for command in reversed(commands):
-        try:
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
             _run_command(command)
-        except (OSError, subprocess.SubprocessError):
-            pass
 
 
 class Helper:
     def __init__(self, args: argparse.Namespace) -> None:
         self.socket_path = Path(args.socket)
-        self.uid = int(args.uid)
-        self.gid = int(args.gid)
+        try:
+            self.uid = int(args.uid)
+            self.gid = int(args.gid)
+        except (TypeError, ValueError) as exc:
+            raise SystemExit(f"--uid/--gid должны быть числами: {exc}") from exc
         self.runner = Runner(Path(args.core), Path(args.config), Path(args.log), self.uid, self.gid)
         self.server: socket.socket | None = None
         self.stop_event = threading.Event()
@@ -345,7 +422,10 @@ class Helper:
         self._validate_paths()
 
     def _validate_paths(self) -> None:
-        helper_info = Path(__file__).stat()
+        try:
+            helper_info = Path(__file__).stat()
+        except OSError as exc:
+            raise SystemExit(f"Не удалось прочитать сам helper: {exc}") from exc
         if helper_info.st_uid != 0 or helper_info.st_mode & 0o022:
             raise SystemExit("privileged.py должен принадлежать root и быть недоступен для записи группе/остальным")
         try:
@@ -355,7 +435,10 @@ class Helper:
         core = self.runner.core
         if not core.is_file() or not os.access(core, os.X_OK):
             raise SystemExit(f"sing-box не найден или не исполняемый: {core}")
-        binary_info = core.stat()
+        try:
+            binary_info = core.stat()
+        except OSError as exc:
+            raise SystemExit(f"Не удалось прочитать ядро {core}: {exc}") from exc
         if binary_info.st_uid != 0 or binary_info.st_mode & 0o022:
             raise SystemExit("Root может запускать только root-owned sing-box, недоступный для записи группе/остальным")
         allowed_roots = [
@@ -439,10 +522,8 @@ class Helper:
         self.server = server
         server.bind(str(self.socket_path))
         os.chmod(self.socket_path, 0o600)
-        try:
+        with contextlib.suppress(OSError):
             os.chown(self.socket_path, self.uid, self.gid)
-        except OSError:
-            pass
         server.listen(2)
         server.settimeout(1.0)
         try:
@@ -456,24 +537,18 @@ class Helper:
                 try:
                     self._handle_client(client)
                 finally:
-                    try:
+                    with contextlib.suppress(OSError):
                         client.close()
-                    except OSError:
-                        pass
                 # Приложение держит одно долгоживущее соединение. Когда оно
                 # закрылось, приложение ушло — не оставляем root-процесс.
                 break
         finally:
             self._router_stop()
             self.runner.stop()
-            try:
+            with contextlib.suppress(OSError):
                 server.close()
-            except OSError:
-                pass
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 self.socket_path.unlink()
-            except FileNotFoundError:
-                pass
         return 0
 
     def _router_start(self) -> dict:
@@ -483,15 +558,25 @@ class Helper:
             wan, subnets = _router_detect()
             if not subnets:
                 return {"ok": False, "error": "LAN-подсети не найдены"}
-            self._router_undo_commands = _router_apply(wan, subnets)
+            _router_sweep()
+            # on_undo фиксирует изменения по ходу применения: при сбое
+            # except ниже откатит сделанное, а не оставит правила висеть.
+            undo = _router_apply(
+                wan, subnets, on_undo=self._router_undo_commands.append
+            )
+            self._router_undo_commands = undo
             return {"ok": True, "wan": wan, "subnets": subnets}
         except Exception as exc:
+            self._router_stop()
             return {"ok": False, "error": str(exc)}
 
     def _router_stop(self) -> dict:
         if self._router_undo_commands:
             _router_undo(self._router_undo_commands)
             self._router_undo_commands = []
+        # Чистим и осиротевшие правила прошлых сессий — метка наша, чужие
+        # правила не трогаем.
+        _router_sweep()
         return {"ok": True}
 
     def _handle_client(self, client: socket.socket) -> None:
@@ -539,18 +624,23 @@ class Helper:
                     response = {"ok": False, "error": f"Внутренняя ошибка: {exc}"}
                 self._send(client, response)
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 reader.close()
-            except Exception:
-                pass
 
     @staticmethod
     def _send(client: socket.socket, payload: dict) -> None:
         data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
-        try:
+        with contextlib.suppress(OSError):
             client.sendall(data)
-        except OSError:
-            pass
+
+
+def _pkexec_uid_conflict(args_uid: object, env: dict) -> bool:
+    """True, если pkexec-UID вызывающего не совпал с запрошенным --uid.
+
+    При запуске через sudo переменная отсутствует — проверка пропускается.
+    """
+    value = env.get("PKEXEC_UID", "")
+    return bool(value) and str(value) != str(args_uid)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -576,15 +666,20 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         parser.error("missing required arguments: " + ", ".join("--" + name for name in missing))
 
+    # pkexec сообщает UID вызвавшего пользователя в PKEXEC_UID: при
+    # расхождении с --uid считаем аргументы подменёнными и отказываемся
+    # работать от имени чужого домашнего каталога.
+    if _pkexec_uid_conflict(args.uid, dict(os.environ)):
+        print("PKEXEC_UID не совпадает с --uid — аргументы выглядят подменёнными", file=sys.stderr)
+        return 1
+
     helper = Helper(args)
 
     def on_signal(_signum, _frame):
         helper.stop_event.set()
         helper.runner.stop()
-        try:
+        with contextlib.suppress(OSError):
             helper.socket_path.unlink()
-        except OSError:
-            pass
         os._exit(0)
 
     signal.signal(signal.SIGTERM, on_signal)
