@@ -258,15 +258,26 @@ entry { border-radius: 10px; }
 dialog, dialog-host > dialog { border-radius: 24px; }
 dialog.bottom-sheet, dialog-host > dialog.bottom-sheet { border-radius: 24px 24px 0 0; }
 popover > contents { border-radius: 14px; }
-popover.menu > contents > modelbutton {
+popover.menu > contents > modelbutton,
+popover.menu > contents > modelbutton:hover,
+popover.menu > contents > modelbutton:active,
+popover.menu > contents > modelbutton:focus,
+popover.menu > contents > modelbutton:checked {
     margin: 2px 6px;
     padding: 7px 10px;
-    border-radius: 10px;
+    border-radius: 12px;
+    background-clip: padding-box;
 }
-popover.menu > contents > modelbutton:hover {
-    border-radius: 10px;
+popover.menu > contents > modelbutton:hover,
+popover.menu > contents > modelbutton:active,
+popover.menu > contents > modelbutton:focus,
+popover.menu > contents > modelbutton:checked {
+    border-radius: 12px;
     background-color: alpha(@window_fg_color, 0.08);
+    background-image: none;
+    box-shadow: none;
 }
+popover.menu > contents > modelbutton check { border-radius: 4px; }
 tooltip { border-radius: 8px; }
 toast { border-radius: 16px; }
 
