@@ -170,7 +170,6 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self._install_css()
         self._build_actions()
         self._build_ui()
-        self._responsive_timer = GLib.timeout_add(300, self._poll_responsive_layout)
         GLib.timeout_add_seconds(3, self._health_tick)
         self._refresh_accent_selection()
         if str(self.store.settings.get("accent_mode", "preset")) == "wallpaper":
@@ -245,9 +244,6 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         if self._closing:
             return
         self._closing = True
-        if self._responsive_timer is not None:
-            GLib.source_remove(self._responsive_timer)
-            self._responsive_timer = None
         theme = getattr(self, "_theme", None)
         if theme is not None:
             theme.dispose()
@@ -394,13 +390,18 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self.shell = shell
         self.toast_overlay.set_child(toolbar)
         self.set_content(self.toast_overlay)
-        self._update_responsive_layout()
+        compact = Adw.BreakpointCondition.parse("max-width: 680sp")
+        self._responsive_breakpoint = Adw.Breakpoint.new(compact)
+        self._responsive_breakpoint.connect(
+            "apply", lambda *_: self._set_responsive_layout(True)
+        )
+        self._responsive_breakpoint.connect(
+            "unapply", lambda *_: self._set_responsive_layout(False)
+        )
+        self.add_breakpoint(self._responsive_breakpoint)
 
-    def _update_responsive_layout(self, *_args) -> None:
-        """Use a bottom navigation bar on narrow phone sized windows."""
-        if not hasattr(self, "right_revealer"):
-            return
-        compact = self.get_width() < 680
+    def _set_responsive_layout(self, compact: bool) -> None:
+        """Switch the shell between desktop sidebar and phone bottom bar."""
         if getattr(self, "_compact_layout", None) is compact:
             return
         self._compact_layout = compact
@@ -437,12 +438,10 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             item.set_spacing(4 if compact else 10)
             label.set_xalign(0.5 if compact else 0.0)
         self._nav_indicator.set_visible(not compact)
-
-    def _poll_responsive_layout(self) -> bool:
-        if self._closing:
-            return False
-        self._update_responsive_layout()
-        return True
+        self.home_layout.set_orientation(
+            Gtk.Orientation.VERTICAL if compact else Gtk.Orientation.HORIZONTAL
+        )
+        self.home_layout.set_spacing(16 if compact else 24)
 
     def _build_right_menu(self) -> Gtk.Widget:
         """Прямоугольная панель меню справа: страницы и быстрые действия."""
@@ -457,6 +456,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         nav.set_hexpand(True)
         nav.set_margin_top(4)
         nav.add_css_class("nav-buttons")
+        theme = self._icon_theme()
         self._nav_buttons = []
         self._nav_item_boxes = []
         self._nav_labels = []
@@ -471,7 +471,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             button.add_css_class("nav-tab")
             item = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
             icon = Gtk.Image.new_from_icon_name(
-                _pick_icon(self._icon_theme(), icon_name, "applications-system-symbolic")
+                _pick_icon(theme, icon_name, "applications-system-symbolic")
             )
             icon.set_pixel_size(18)
             label = Gtk.Label(label=title, xalign=0.0)
@@ -555,12 +555,21 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_vexpand(True)
         clamp = Adw.Clamp()
-        clamp.set_maximum_size(540)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        clamp.set_maximum_size(980)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
         box.set_margin_start(18)
         box.set_margin_end(18)
         box.set_margin_top(24)
         box.set_margin_bottom(24)
+        self.home_layout = box
+        main_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        main_column.add_css_class("home-main-column")
+        main_column.set_hexpand(True)
+        details_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
+        details_column.add_css_class("home-details-column")
+        details_column.set_hexpand(True)
+        box.append(main_column)
+        box.append(details_column)
         self.home_status = Gtk.Label(label="Отключено")
         self.home_status.add_css_class("home-status")
         self.home_status.set_halign(Gtk.Align.CENTER)
@@ -593,7 +602,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         hero.append(self.home_detail)
         hero.append(self.health_label)
         hero.append(self.big_button)
-        box.append(hero)
+        main_column.append(hero)
         self.server_card.add_css_class("flat")
         self.server_card.add_css_class("server-card")
         self.server_card.set_halign(Gtk.Align.FILL)
@@ -626,7 +635,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         card_right.append(next_icon)
         self.server_card.set_child(card)
         card.append(card_right)
-        box.append(self.server_card)
+        main_column.append(self.server_card)
         self.home_hint = Gtk.Label(
             label="Профилей пока нет. Вставьте ссылку vless:// или URL подписки ниже."
         )
@@ -634,7 +643,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self.home_hint.set_halign(Gtk.Align.CENTER)
         self.home_hint.add_css_class("section-hint")
         self.home_hint.set_visible(False)
-        box.append(self.home_hint)
+        main_column.append(self.home_hint)
         self.quick_group = Adw.PreferencesGroup(
             title="Быстрое подключение",
             description="Вставьте ссылку vless:// или URL подписки — профиль добавится и подключится.",
@@ -656,7 +665,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self.quick_entry.add_suffix(quick_suffix)
         self.quick_entry.connect("entry-activated", self._quick_connect)
         self.quick_group.add(self.quick_entry)
-        box.append(self.quick_group)
+        details_column.append(self.quick_group)
         self.speed_group = Adw.PreferencesGroup(title="Скорость и задержка")
         speed_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         speed_icon = _pick_icon(theme, "dma2box-speed-symbolic", "network-transmit-receive-symbolic")
@@ -671,7 +680,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self.speed_down_row = Adw.ActionRow(title="Скорость загрузки", subtitle="—")
         self.speed_group.add(self.speed_latency_row)
         self.speed_group.add(self.speed_down_row)
-        box.append(self.speed_group)
+        details_column.append(self.speed_group)
         clamp.set_child(box)
         scrolled.set_child(clamp)
         return scrolled

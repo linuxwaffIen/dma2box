@@ -580,11 +580,14 @@ window {
     letter-spacing: -0.3px;
 }
 .home-hero {
-    padding: 24px 20px;
+    padding: 32px 28px;
     border-radius: 24px;
     background-color: alpha(@card_bg_color, 0.74);
     border: 1px solid alpha(@window_fg_color, 0.08);
+    box-shadow: 0 10px 28px alpha(@window_fg_color, 0.06);
 }
+.home-main-column, .home-details-column { min-width: 0; }
+.home-details-column { padding-top: 4px; }
 .server-card {
     padding: 14px 16px;
     border-left: 3px solid @accent_color;
@@ -666,6 +669,7 @@ scrollbar slider {
     padding: 18px 14px;
     border-radius: 22px;
 }
+.mobile-layout .home-details-column { padding-top: 0; }
 """
 
 
