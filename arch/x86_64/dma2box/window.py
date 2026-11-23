@@ -209,8 +209,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         return self._core
 
     def import_uris(self, uris: list[str]) -> None:
-        added = 0
-        imported = 0
+        items: list[tuple[str, str]] = []
         for uri in uris:
             try:
                 parsed = parse_any(uri)
@@ -228,12 +227,8 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
                     self._toast(f"Не удалось импортировать: {first_error}")
                     continue
                 uri = stripped
-            existing = self.store.find_profile_by_uri(uri)
-            profile = self.store.add_profile(parsed.name, uri)
-            self.store.select_profile(profile.id)
-            imported += 1
-            if existing is None:
-                added += 1
+            items.append((parsed.name, uri))
+        imported, added = self.store.import_profiles(items)
         if imported:
             self._refresh_all()
         if added:
@@ -1827,6 +1822,8 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
 
     def _health_checked(self, result: health.HealthResult, real_ip: str) -> bool:
         self._health_busy = False
+        if self._closing:
+            return False
         if real_ip:
             self._health_real_ip = real_ip
         if self._core.status.state != "running":
@@ -2019,6 +2016,8 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
 
     def _finish_speed_test(self, result: SpeedResult) -> bool:
         self._speed_running = False
+        if self._closing:
+            return False
         self.speed_button.set_sensitive(True)
         if result.error:
             self.speed_latency_row.set_subtitle(
@@ -2100,6 +2099,8 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
 
     def _finish_subscription(self, sub_id: str, future) -> bool:
         self._updating_subs.discard(sub_id)
+        if self._closing:
+            return False
         sub = self.store.get_subscription(sub_id)
         if sub is None:
             self._pending_quick_sub = (

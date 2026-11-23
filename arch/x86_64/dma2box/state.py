@@ -244,6 +244,33 @@ class Store:
         self.save()
         return profile
 
+    def import_profiles(self, items: list[tuple[str, str]]) -> tuple[int, int]:
+        """Add or update imported profiles and persist the batch once."""
+        if not items:
+            return 0, 0
+        by_uri = {profile.uri: profile for profile in self.profiles}
+        initial_uris = set(by_uri)
+        imported = 0
+        last_profile: Profile | None = None
+        for name, uri in items:
+            profile = by_uri.get(uri)
+            if profile is None:
+                profile = Profile(name=name or uri.split("@")[-1][:80], uri=uri)
+                self.profiles.append(profile)
+                by_uri[uri] = profile
+            elif name and name != profile.name:
+                profile.name = name
+                profile.updated_at = time.time()
+            if not self.settings.get("selected_profile_id"):
+                self.settings["selected_profile_id"] = profile.id
+            last_profile = profile
+            imported += 1
+        if last_profile is not None:
+            self.settings["selected_profile_id"] = last_profile.id
+        self.save()
+        added = len(set(by_uri) - initial_uris)
+        return imported, added
+
     def rename_profile(self, profile_id: str, name: str) -> None:
         profile = self.get_profile(profile_id)
         if profile and name.strip():
