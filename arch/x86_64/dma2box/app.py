@@ -88,8 +88,7 @@ class Dma2boxApplication(Adw.Application):
         if not self.window.core.is_running:
             profile = self.window.store.selected_profile
             if profile is not None:
-                tun = self.window.store.mode in ("vpn", "router")
-                self.window.core.start(profile, tun)
+                self.window.start_selected()
         return False
 
 

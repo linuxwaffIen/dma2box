@@ -1734,6 +1734,12 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             return
         self._start_selected()
 
+    def start_selected(self) -> None:
+        """Start the selected profile through validation and TUN setup."""
+        if self.store.mode in ("vpn", "router") and tun_setup.needs_setup(self.store):
+            self.present()
+        self._start_selected()
+
     def _start_selected(self) -> None:
         profile = self.store.selected_profile
         if not profile:
