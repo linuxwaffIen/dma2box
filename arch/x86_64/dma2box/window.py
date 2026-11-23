@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import platform
 import shutil
 import threading
@@ -25,6 +26,7 @@ from .hysteria import parse_any
 from .qrcode_util import generate_qr_png, decode_qr_from_file, QRCODE_AVAILABLE
 
 NAV_TRANSITION_DURATION_MS = 220
+LOGGER = logging.getLogger(__name__)
 
 SCHEMES = {
     "system": Adw.ColorScheme.DEFAULT,
@@ -146,6 +148,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self._nav_animation_source: int | None = None
         self._log_timeout: int | None = None
         self._log_dialog: Adw.Dialog | None = None
+        self._settings_save_timeout: int | None = None
         self._auto_update_timeout: int | None = None
         self._health_failures = 0
         self._health_busy = False
@@ -240,6 +243,13 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         if self._closing:
             return
         self._closing = True
+        if self._settings_save_timeout is not None:
+            GLib.source_remove(self._settings_save_timeout)
+            self._settings_save_timeout = None
+            try:
+                self.store.save()
+            except OSError:
+                LOGGER.exception("Could not persist settings during shutdown")
         theme = getattr(self, "_theme", None)
         if theme is not None:
             theme.dispose()
@@ -838,7 +848,9 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         timeout_row.set_digits(1)
         timeout_row.connect(
             "notify::value",
-            lambda row, _p: self.store.set_setting("ping_timeout", float(row.get_value())),
+            lambda row, _p: self._set_setting_debounced(
+                "ping_timeout", float(row.get_value())
+            ),
         )
         interface.add(timeout_row)
         ping_type_row = Adw.ComboRow(
@@ -920,7 +932,9 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         )
         interval_row.connect(
             "notify::value",
-            lambda row, _p: self.store.set_setting("health_interval", int(row.get_value())),
+            lambda row, _p: self._set_setting_debounced(
+                "health_interval", int(row.get_value())
+            ),
         )
         reliability.add(interval_row)
         page.add(reliability)
@@ -933,7 +947,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         rules_row.set_text("\n".join(self.store.settings.get("route_rules", [])))
         rules_row.connect(
             "notify::text",
-            lambda row, _p: self.store.set_setting(
+            lambda row, _p: self._set_setting_debounced(
                 "route_rules", [line for line in row.get_text().splitlines() if line.strip()]
             ),
         )
@@ -942,7 +956,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         geo_row.set_text(",".join(self.store.settings.get("geo_rule_sets", [])))
         geo_row.connect(
             "notify::text",
-            lambda row, _p: self.store.set_setting(
+            lambda row, _p: self._set_setting_debounced(
                 "geo_rule_sets",
                 [url.strip() for url in row.get_text().split(",") if url.strip()],
             ),
@@ -2418,10 +2432,26 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             if int(row.get_value()) != old:
                 row.set_value(old)
             return
-        self.store.set_setting(key, value)
+        self._set_setting_debounced(key, value)
         self._update_status(self._core.status)
         if self._core.is_running:
             self._toast("Переподключитесь, чтобы применить порт")
+
+    def _set_setting_debounced(self, key: str, value: Any) -> None:
+        """Update live settings now and coalesce repeated edits into one disk write."""
+        self.store.set_setting(key, value, persist=False)
+        if self._settings_save_timeout is not None:
+            GLib.source_remove(self._settings_save_timeout)
+        self._settings_save_timeout = GLib.timeout_add(450, self._persist_settings)
+
+    def _persist_settings(self) -> bool:
+        self._settings_save_timeout = None
+        if not self._closing:
+            try:
+                self.store.save()
+            except OSError:
+                LOGGER.exception("Could not persist updated settings")
+        return False
 
     def _settings_log_level(self, row: Adw.ComboRow, _param) -> None:
         index = int(row.get_selected())

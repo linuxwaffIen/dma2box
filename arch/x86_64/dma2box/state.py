@@ -500,11 +500,15 @@ class Store:
         self.settings["tun_enabled"] = mode in ("vpn", "router")
         self.save()
 
-    def set_setting(self, key: str, value: Any) -> None:
+    def set_setting(self, key: str, value: Any, *, persist: bool = True) -> None:
+        if key not in DEFAULT_SETTINGS:
+            raise KeyError(f"Unknown setting: {key}")
         self.settings[key] = value
         if key == "mode" and value in MODES:
             self.settings["tun_enabled"] = value in ("vpn", "router")
-        self.save()
+        self._sanitize_settings()
+        if persist:
+            self.save()
 
     def core_path(self) -> Path:
         configured = str(self.settings.get("core_path") or "").strip()
