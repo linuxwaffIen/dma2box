@@ -635,6 +635,28 @@ scrollbar slider {
     color: @accent_color;
     border-radius: 10px;
 }
+.profile-actions > button {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: 999px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+}
+.profile-actions > button:hover,
+.profile-actions > button:checked {
+    border-radius: 999px;
+    background-color: alpha(@window_fg_color, 0.09);
+    background-image: none;
+    box-shadow: none;
+}
+.profile-actions > button:active {
+    border-radius: 999px;
+    background-color: alpha(@window_fg_color, 0.15);
+    background-image: none;
+    box-shadow: none;
+}
 .nav-indicator {
     border-radius: 0;
     min-height: 2px;

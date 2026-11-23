@@ -130,6 +130,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         self._updating_subs: set[str] = set()
         self._pending_quick_sub: str | None = None
         self._pending_pings = 0
+        self._pings_inflight: set[str] = set()
         self._last_ping_all = 0.0
         self._auto_ping_scheduled = False
         self._speed_running = False
@@ -1275,6 +1276,16 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
 
     # --------------------------------------------------------------- refresh
     def _refresh_all(self) -> None:
+        profile_ids = {profile.id for profile in self.store.profiles}
+        profile_uris = {profile.uri for profile in self.store.profiles}
+        self.latencies = {
+            profile_id: latency
+            for profile_id, latency in self.latencies.items()
+            if profile_id in profile_ids
+        }
+        self._parsed = {
+            uri: parsed for uri, parsed in self._parsed.items() if uri in profile_uris
+        }
         self._rebuild_profiles()
         self._rebuild_subscriptions()
         has_content = bool(self.store.profiles or self.store.subscriptions)
@@ -1357,6 +1368,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             menu_button.set_icon_name("view-more-symbolic")
             menu_button.set_menu_model(menu)
             menu_button.add_css_class("flat")
+            menu_button.add_css_class("profile-actions")
             menu_button.set_tooltip_text("Действия с профилем")
             box.append(menu_button)
             row.add_suffix(box)
@@ -1406,6 +1418,7 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             menu_button.set_icon_name("view-more-symbolic")
             menu_button.set_menu_model(menu)
             menu_button.add_css_class("flat")
+            menu_button.add_css_class("profile-actions")
             row.add_suffix(menu_button)
             self.subs_group.add(row)
             self._sub_rows.append(row)
@@ -1898,6 +1911,8 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
 
     # ------------------------------------------------------------------- ping
     def _ping_profile(self, profile_id: str) -> None:
+        if self._closing or profile_id in self._pings_inflight:
+            return
         profile = self.store.get_profile(profile_id)
         if not profile:
             return
@@ -1926,12 +1941,17 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
             )
         except RuntimeError:
             return
+        self._pings_inflight.add(profile_id)
         self._pending_pings += 1
         future.add_done_callback(
             lambda f, pid=profile_id: GLib.idle_add(self._finish_ping, pid, f)
         )
 
     def _finish_ping(self, profile_id: str, future) -> bool:
+        self._pings_inflight.discard(profile_id)
+        self._pending_pings = max(0, self._pending_pings - 1)
+        if self._closing:
+            return False
         try:
             ms = future.result()
         except Exception:
@@ -1940,7 +1960,6 @@ class MainWindow(AccentMixin, Adw.ApplicationWindow):
         label = self._latency_labels.get(profile_id)
         if label:
             self._set_pill(label, ms)
-        self._pending_pings = max(0, self._pending_pings - 1)
         self._update_server_card()
         if self._pending_pings == 0 and self.store.settings.get("sort_by_latency"):
             self._rebuild_profiles()
