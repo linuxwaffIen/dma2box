@@ -50,12 +50,20 @@ class TrayController:
         if self._proc is not None or self._server is not None:
             # Clean up after a helper that exited unexpectedly.
             self.stop()
-        paths.RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            paths.RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return False
         try:
             paths.TRAY_SOCKET.unlink()
         except FileNotFoundError:
             pass
-        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        except OSError:
+            return False
+        try:
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        except OSError:
+            return False
         try:
             server.bind(str(paths.TRAY_SOCKET))
             server.listen(2)
@@ -70,8 +78,12 @@ class TrayController:
         self._thread.start()
 
         log_path = paths.CACHE_DIR / "tray.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_handle = log_path.open("ab", buffering=0)
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_handle = log_path.open("ab", buffering=0)
+        except OSError:
+            self.stop()
+            return False
         mode_labels = json.dumps(
             [[mode, label] for mode, label in zip(MODES, MODE_LABELS)],
             ensure_ascii=False,
@@ -152,6 +164,8 @@ class TrayController:
         try:
             paths.TRAY_SOCKET.unlink()
         except FileNotFoundError:
+            pass
+        except OSError:
             pass
 
     def send_state(

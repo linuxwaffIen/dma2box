@@ -67,7 +67,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-_same_memo: dict[tuple[str, str], tuple[tuple[int, int, int, int], bool]] = {}
+_same_memo: dict[tuple[str, str], tuple[tuple[int, ...], bool]] = {}
 
 
 def _same_file(a: Path, b: Path) -> bool:
@@ -80,7 +80,18 @@ def _same_file(a: Path, b: Path) -> bool:
         return False
     if sa.st_size != sb.st_size:
         return False
-    fingerprint = (sa.st_size, sb.st_size, sa.st_mtime_ns, sb.st_mtime_ns)
+    fingerprint = (
+        sa.st_dev,
+        sa.st_ino,
+        sa.st_size,
+        sa.st_mtime_ns,
+        sa.st_ctime_ns,
+        sb.st_dev,
+        sb.st_ino,
+        sb.st_size,
+        sb.st_mtime_ns,
+        sb.st_ctime_ns,
+    )
     key = (str(a), str(b))
     memo = _same_memo.get(key)
     if memo is not None and memo[0] == fingerprint:

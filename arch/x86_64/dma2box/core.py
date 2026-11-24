@@ -271,8 +271,10 @@ class CoreManager:
         self._helper_key: tuple[str, str, str] | None = None
         self._intentional = True
         self._starting = False
+        self._stopping = False
         self._monitors = 0
         self._cancel = threading.Event()
+        self._tun_monitor_cancel = threading.Event()
 
     @property
     def status(self) -> CoreStatus:
@@ -284,12 +286,18 @@ class CoreManager:
 
     # --------------------------------------------------------------- public
     def start(self, profile: Profile, tun: bool) -> None:
+        # The worker holds _lock while performing startup I/O. Avoid making a
+        # repeated UI activation wait behind DNS, validation, or polkit.
+        if self._starting or self._stopping:
+            return
         with self._lock:
-            if self._starting:
+            if self._starting or self._stopping:
                 return
             self._starting = True
             self._intentional = False
             self._cancel.clear()
+            self._tun_monitor_cancel.set()
+            self._tun_monitor_cancel = threading.Event()
         thread = threading.Thread(
             target=self._start_worker, args=(profile, tun), name="singbox-start", daemon=True
         )
@@ -336,16 +344,25 @@ class CoreManager:
 
     def stop(self) -> None:
         # Cancel a pending pkexec prompt or config check as soon as possible.
+        if self._stopping:
+            return
+        self._stopping = True
         self._cancel.set()
+        self._tun_monitor_cancel.set()
         thread = threading.Thread(target=self._stop_worker, name="singbox-stop", daemon=True)
         thread.start()
 
     def shutdown(self) -> None:
+        self._stopping = True
         self._cancel.set()
-        with self._lock:
-            self._intentional = True
-            self._stop_internal(shutdown_helper=True)
-            self._status = CoreStatus("stopped")
+        self._tun_monitor_cancel.set()
+        try:
+            with self._lock:
+                self._intentional = True
+                self._stop_internal(shutdown_helper=True)
+                self._status = CoreStatus("stopped")
+        finally:
+            self._stopping = False
 
     def log_text(self, limit: int = 16000) -> str:
         text = _tail(paths.LOG_FILE, limit)
@@ -440,6 +457,7 @@ class CoreManager:
                                 raise CoreError(f"Роутер (NAT) не включён: {result.get('error')}")
                     else:
                         self._start_direct(core)
+                    self._raise_if_cancelled()
                     self._emit(CoreStatus("running", profile.id, tun, "Подключено"))
                 except Exception as exc:
                     self._stop_internal(shutdown_helper=False, notify=False)
@@ -466,10 +484,13 @@ class CoreManager:
             raise CoreError("Запуск отменён")
 
     def _stop_worker(self) -> None:
-        with self._lock:
-            self._intentional = True
-            self._stop_internal(shutdown_helper=False)
-            self._emit(CoreStatus("stopped"))
+        try:
+            with self._lock:
+                self._intentional = True
+                self._stop_internal(shutdown_helper=False)
+                self._emit(CoreStatus("stopped"))
+        finally:
+            self._stopping = False
 
     # --------------------------------------------------------------- direct
     def _start_direct(self, core: Path) -> None:
@@ -538,8 +559,12 @@ class CoreManager:
             log = response.get("log") or _tail(paths.LOG_FILE)
             error = response.get("error") or "sing-box не запустился"
             raise CoreError(f"{error}\n{log}".strip())
+        monitor_cancel = self._tun_monitor_cancel
         thread = threading.Thread(
-            target=self._monitor_tun, name="singbox-tun-monitor", daemon=True
+            target=self._monitor_tun,
+            args=(monitor_cancel,),
+            name="singbox-tun-monitor",
+            daemon=True,
         )
         thread.start()
 
@@ -738,19 +763,21 @@ class CoreManager:
                     time.sleep(0.2)
         raise CoreError("Истекло время ожидания авторизации pkexec (120 с)")
 
-    def _monitor_tun(self) -> None:
-        while True:
+    def _monitor_tun(self, cancel: threading.Event) -> None:
+        while not cancel.is_set():
             time.sleep(2.0)
+            if cancel.is_set():
+                return
             with self._lock:
                 helper = self._helper
-                if helper is None or self._intentional:
+                if helper is None or self._intentional or cancel.is_set():
                     return
                 profile_id = self._status.profile_id
             try:
                 response = helper.request({"cmd": "status"}, timeout=6)
             except CoreError as exc:
                 with self._lock:
-                    if self._intentional:
+                    if self._intentional or cancel.is_set():
                         return
                     self._emit(
                         CoreStatus(
@@ -765,7 +792,7 @@ class CoreManager:
                 return
             if not response.get("running"):
                 with self._lock:
-                    if self._intentional:
+                    if self._intentional or cancel.is_set():
                         return
                     message = response.get("error") or "sing-box остановился"
                     log = response.get("log") or _tail(paths.LOG_FILE)
